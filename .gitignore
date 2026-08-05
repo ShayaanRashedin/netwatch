@@ -1,0 +1,51 @@
+# Build directories
+build/
+out/
+cmake-build-*/
+
+# CMake
+CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+
+# Compiled files
+*.o
+*.a
+*.so
+*.out
+
+# Test and coverage output
+Testing/
+coverage/
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# Sanitizer output
+asan.log*
+tsan.log*
+ubsan.log*
+
+# Databases and runtime files
+*.db
+*.db-shm
+*.db-wal
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+
+# Operating systems
+.DS_Store
+Thumbs.db

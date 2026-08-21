@@ -35,3 +35,53 @@ TEST_CASE("IPv4 TCP listener is parsed from procfs")
     CHECK(socket.state == netwatch::TcpState::Listen);
     CHECK(socket.inode == 123456);
 }
+
+TEST_CASE("Empty socket table produces no records")
+{
+    std::istringstream input {};
+
+    netwatch::ProcNetSocketParser parser;
+
+    const auto sockets = parser.parse(
+        input,
+        netwatch::IpFamily::IPv4,
+        netwatch::TransportProtocol::Tcp
+    );
+
+    CHECK(sockets.empty());
+}
+
+TEST_CASE("Socket table containing only header produces no records")
+{
+    std::istringstream input {
+        "  sl  local_address rem_address st tx_queue rx_queue\n"
+    };
+
+    netwatch::ProcNetSocketParser parser;
+
+    const auto sockets = parser.parse(
+        input,
+        netwatch::IpFamily::IPv4,
+        netwatch::TransportProtocol::Tcp
+    );
+
+    CHECK(sockets.empty());
+}
+
+TEST_CASE("Malformed socket row is ignored")
+{
+    std::istringstream input {
+        "header\n"
+        "0: 0100007F:1F90 00000000:0000\n"
+    };
+
+    netwatch::ProcNetSocketParser parser;
+
+    const auto sockets = parser.parse(
+        input,
+        netwatch::IpFamily::IPv4,
+        netwatch::TransportProtocol::Tcp
+    );
+
+    CHECK(sockets.empty());
+}

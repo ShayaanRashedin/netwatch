@@ -13,6 +13,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(netwatch
     src/main.cpp
+    src/procfs/ProcNetSocketParser.cpp
+)
+
+target_include_directories(netwatch PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
 
 target_compile_options(netwatch PRIVATE

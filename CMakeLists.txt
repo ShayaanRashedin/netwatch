@@ -59,7 +59,7 @@ target_compile_options(netwatch PRIVATE
 )
 
 add_executable(netwatch_tests
-    tests/unit/tests/unit/ProcNetSocketParserTests.cpp
+    tests/unit/ProcNetSocketParserTests.cpp
 )
 
 target_link_libraries(netwatch_tests PRIVATE

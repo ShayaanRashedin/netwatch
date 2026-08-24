@@ -85,3 +85,49 @@ TEST_CASE("Malformed socket row is ignored")
 
     CHECK(sockets.empty());
 }
+
+TEST_CASE("Unknown TCP state is preserved as Unknown")
+{
+    std::istringstream input {
+        "header\n"
+        "0: 0100007F:1F90 00000000:0000 FF "
+        "00000000:00000000 00:00000000 00000000 "
+        "1000 0 123456\n"
+    };
+
+    netwatch::ProcNetSocketParser parser;
+
+    const auto sockets = parser.parse(
+        input,
+        netwatch::IpFamily::IPv4,
+        netwatch::TransportProtocol::Tcp
+    );
+
+    REQUIRE(sockets.size() == 1);
+    CHECK(sockets.front().state == netwatch::TcpState::Unknown);
+}
+
+TEST_CASE("Multiple IPv4 TCP sockets are parsed")
+{
+    std::istringstream input {
+        "header\n"
+        "0: 0100007F:1F90 00000000:0000 0A "
+        "00000000:00000000 00:00000000 00000000 "
+        "1000 0 123456\n"
+        "1: 00000000:0016 00000000:0000 0A "
+        "00000000:00000000 00:00000000 00000000 "
+        "1000 0 654321\n"
+    };
+
+    netwatch::ProcNetSocketParser parser;
+
+    const auto sockets = parser.parse(
+        input,
+        netwatch::IpFamily::IPv4,
+        netwatch::TransportProtocol::Tcp
+    );
+
+    REQUIRE(sockets.size() == 2);
+    CHECK(sockets[0].local.port == 8080);
+    CHECK(sockets[1].local.port == 22);
+}

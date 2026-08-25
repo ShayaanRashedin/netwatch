@@ -93,6 +93,32 @@ TEST_CASE("Socket inode is correlated with its owning process")
         processDirectory / "fd" / "4"
     );
 
+    std::filesystem::create_symlink(
+        "/usr/bin/python3",
+        processDirectory / "exe"
+    );
+
+    {
+        std::ofstream commandLineFile {
+            processDirectory / "cmdline",
+            std::ios::binary
+        };
+
+        REQUIRE(commandLineFile.is_open());
+
+        commandLineFile << "python3";
+        commandLineFile.put('\0');
+
+        commandLineFile << "-m";
+        commandLineFile.put('\0');
+
+        commandLineFile << "http.server";
+        commandLineFile.put('\0');
+
+        commandLineFile << "8080";
+        commandLineFile.put('\0');
+    }
+
     netwatch::ProcessResolver resolver {
         procTree.root()
     };
@@ -110,5 +136,10 @@ TEST_CASE("Socket inode is correlated with its owning process")
     CHECK(process.name == "python3");
     CHECK(owners.size() == 1);
     CHECK(process.uid == currentUid);
+    CHECK(process.executable == "/usr/bin/python3");
+    CHECK(
+        process.command_line
+        == "python3 -m http.server 8080"
+    ); 
     CHECK_FALSE(process.username.empty());
 }

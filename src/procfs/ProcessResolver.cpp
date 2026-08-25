@@ -12,6 +12,7 @@
 #include <pwd.h>
 #include <unistd.h>
 #include <vector>
+#include <iterator>
 
 namespace netwatch {
 
@@ -165,6 +166,54 @@ std::optional<std::string> readProcessName(
     return name;
 }
 
+std::string readProcessExecutable(
+    const std::filesystem::path& processDirectory)
+{
+    std::error_code error;
+
+    const auto executable = std::filesystem::read_symlink(
+        processDirectory / "exe",
+        error
+    );
+
+    if (error) {
+        return {};
+    }
+
+    return executable.string();
+}
+
+std::string readProcessCommandLine(
+    const std::filesystem::path& processDirectory)
+{
+    std::ifstream input {
+        processDirectory / "cmdline",
+        std::ios::binary
+    };
+
+    if (!input.is_open()) {
+        return {};
+    }
+
+    std::string commandLine {
+        std::istreambuf_iterator<char> {input},
+        std::istreambuf_iterator<char> {}
+    };
+
+    for (char& character : commandLine) {
+        if (character == '\0') {
+            character = ' ';
+        }
+    }
+
+    while (!commandLine.empty()
+           && commandLine.back() == ' ') {
+        commandLine.pop_back();
+    }
+
+    return commandLine;
+}
+
 } // namespace
 
 ProcessResolver::ProcessResolver(
@@ -220,6 +269,12 @@ ProcessResolver::resolveSocketOwners() const
             process.uid = *uid;
             process.username = lookupUsername(*uid);
         }
+
+        process.executable =
+            readProcessExecutable(processDirectory);
+
+        process.command_line =
+            readProcessCommandLine(processDirectory);
 
         std::error_code fdError;
 

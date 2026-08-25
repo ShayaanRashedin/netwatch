@@ -115,9 +115,22 @@ int main()
                         << " user="
                         << process.username;
                 }
+
+                if (!process.executable.empty()) {
+                    std::cout
+                        << " exe="
+                        << process.executable;
+                }
+
+                if (!process.command_line.empty()) {
+                    std::cout
+                        << " cmd=\""
+                        << process.command_line
+                        << '"';
+                }
             }
         }
-        
+
         std::cout << '\n';
     }
 }

@@ -3,6 +3,7 @@
 #include "netwatch/core/ProcessInfo.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <unordered_map>
 #include <vector>
 
@@ -16,8 +17,15 @@ public:
             std::vector<ProcessInfo>
         >;
 
+    explicit ProcessResolver(
+        std::filesystem::path procRoot = "/proc"
+    );
+
     [[nodiscard]]
     SocketOwnerMap resolveSocketOwners() const;
+
+private:
+    std::filesystem::path proc_root_;
 };
 
 } // namespace netwatch

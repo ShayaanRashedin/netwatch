@@ -26,6 +26,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(netwatch_core
     src/procfs/ProcNetSocketParser.cpp
+    src/procfs/ProcessResolver.cpp
 )
 
 target_include_directories(netwatch_core PUBLIC

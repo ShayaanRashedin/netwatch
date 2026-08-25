@@ -1,0 +1,176 @@
+#include "netwatch/procfs/ProcessResolver.hpp"
+
+#include <charconv>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_set>
+#include <utility>
+
+namespace netwatch {
+
+namespace {
+
+std::optional<int> parsePid(const std::string_view text)
+{
+    int pid {};
+
+    const auto [ptr, error] = std::from_chars(
+        text.data(),
+        text.data() + text.size(),
+        pid
+    );
+
+    if (error != std::errc {}
+        || ptr != text.data() + text.size()
+        || pid <= 0) {
+        return std::nullopt;
+    }
+
+    return pid;
+}
+
+std::optional<std::uint64_t> parseSocketInode(
+    const std::filesystem::path& target)
+{
+    const std::string text = target.string();
+    constexpr std::string_view prefix {"socket:["};
+
+    if (!text.starts_with(prefix)
+        || text.size() <= prefix.size()
+        || text.back() != ']') {
+        return std::nullopt;
+    }
+
+    const std::string_view inodeText {
+        text.data() + prefix.size(),
+        text.size() - prefix.size() - 1U
+    };
+
+    std::uint64_t inode {};
+
+    const auto [ptr, error] = std::from_chars(
+        inodeText.data(),
+        inodeText.data() + inodeText.size(),
+        inode
+    );
+
+    if (error != std::errc {}
+        || ptr != inodeText.data() + inodeText.size()) {
+        return std::nullopt;
+    }
+
+    return inode;
+}
+
+std::optional<std::string> readProcessName(
+    const std::filesystem::path& processDirectory)
+{
+    std::ifstream input {processDirectory / "comm"};
+    std::string name;
+
+    if (!std::getline(input, name)) {
+        return std::nullopt;
+    }
+
+    return name;
+}
+
+} // namespace
+
+ProcessResolver::ProcessResolver(
+    std::filesystem::path procRoot)
+    : proc_root_ {std::move(procRoot)}
+{
+}
+
+ProcessResolver::SocketOwnerMap
+ProcessResolver::resolveSocketOwners() const
+{
+    SocketOwnerMap owners;
+
+    const auto options =
+        std::filesystem::directory_options::skip_permission_denied;
+
+    std::error_code processError;
+
+    std::filesystem::directory_iterator processIterator {
+        proc_root_,
+        options,
+        processError
+    };
+
+    const std::filesystem::directory_iterator end;
+
+    while (processIterator != end) {
+        const auto processDirectory = processIterator->path();
+
+        processIterator.increment(processError);
+        processError.clear();
+
+        const auto pid =
+            parsePid(processDirectory.filename().string());
+
+        if (!pid.has_value()) {
+            continue;
+        }
+
+        const auto name = readProcessName(processDirectory);
+
+        if (!name.has_value()) {
+            continue;
+        }
+
+        ProcessInfo process;
+        process.pid = *pid;
+        process.name = *name;
+
+        std::error_code fdError;
+
+        std::filesystem::directory_iterator fdIterator {
+            processDirectory / "fd",
+            options,
+            fdError
+        };
+
+        if (fdError) {
+            continue;
+        }
+
+        std::unordered_set<std::uint64_t> seenInodes;
+
+        while (fdIterator != end) {
+            const auto fdPath = fdIterator->path();
+
+            fdIterator.increment(fdError);
+            fdError.clear();
+
+            std::error_code linkError;
+            const auto target =
+                std::filesystem::read_symlink(fdPath, linkError);
+
+            if (linkError) {
+                continue;
+            }
+
+            const auto inode = parseSocketInode(target);
+
+            if (!inode.has_value()) {
+                continue;
+            }
+
+            if (!seenInodes.insert(*inode).second) {
+                continue;
+            }
+
+            owners[*inode].push_back(process);
+        }
+    }
+
+    return owners;
+}
+
+} // namespace netwatch

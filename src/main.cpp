@@ -1,4 +1,5 @@
 #include "netwatch/procfs/ProcNetSocketParser.hpp"
+#include "netwatch/procfs/ProcessResolver.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -73,6 +74,10 @@ int main()
         netwatch::TransportProtocol::Tcp
     );
 
+    netwatch::ProcessResolver processResolver;
+    const auto socketOwners =
+        processResolver.resolveSocketOwners();
+
     std::cout
         << "NetWatch IPv4 TCP snapshot\n"
         << "Sockets found: "
@@ -92,9 +97,20 @@ int main()
             << "  "
             << tcpStateToString(socket.state)
             << "  inode="
-            << socket.inode
-            << '\n';
-    }
+            << socket.inode;
 
-    return 0;
+        const auto owners = socketOwners.find(socket.inode);
+
+        if (owners == socketOwners.end()) {
+            std::cout << "  owner=unknown";
+        } else {
+            for (const auto& process : owners->second) {
+                std::cout
+                    << "  pid=" << process.pid
+                    << " process=" << process.name;
+            }
+        }
+
+        std::cout << '\n';
+    }
 }

@@ -9,10 +9,96 @@
 #include <system_error>
 #include <unordered_set>
 #include <utility>
+#include <pwd.h>
+#include <unistd.h>
+#include <vector>
 
 namespace netwatch {
 
 namespace {
+
+std::optional<unsigned int> readProcessUid(
+    const std::filesystem::path& processDirectory)
+{
+    std::ifstream input {processDirectory / "status"};
+    std::string line;
+
+    constexpr std::string_view prefix {"Uid:"};
+
+    while (std::getline(input, line)) {
+        if (!line.starts_with(prefix)) {
+            continue;
+        }
+
+        std::string_view value {line};
+        value.remove_prefix(prefix.size());
+
+        const auto firstDigit =
+            value.find_first_not_of(" \t");
+
+        if (firstDigit == std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        value.remove_prefix(firstDigit);
+
+        const auto separator =
+            value.find_first_of(" \t");
+
+        if (separator != std::string_view::npos) {
+            value = value.substr(0, separator);
+        }
+
+        unsigned int uid {};
+
+        const auto [ptr, error] = std::from_chars(
+            value.data(),
+            value.data() + value.size(),
+            uid
+        );
+
+        if (error != std::errc {}
+            || ptr != value.data() + value.size()) {
+            return std::nullopt;
+        }
+
+        return uid;
+    }
+
+    return std::nullopt;
+}
+
+std::string lookupUsername(const unsigned int uid)
+{
+    const long configuredSize =
+        ::sysconf(_SC_GETPW_R_SIZE_MAX);
+
+    const std::size_t bufferSize =
+        configuredSize > 0
+            ? static_cast<std::size_t>(configuredSize)
+            : std::size_t {16'384};
+
+    std::vector<char> buffer(bufferSize);
+
+    struct passwd entry {};
+    struct passwd* result = nullptr;
+
+    const int status = ::getpwuid_r(
+        static_cast<uid_t>(uid),
+        &entry,
+        buffer.data(),
+        buffer.size(),
+        &result
+    );
+
+    if (status != 0
+        || result == nullptr
+        || entry.pw_name == nullptr) {
+        return {};
+    }
+
+    return entry.pw_name;
+}
 
 std::optional<int> parsePid(const std::string_view text)
 {
@@ -127,6 +213,13 @@ ProcessResolver::resolveSocketOwners() const
         ProcessInfo process;
         process.pid = *pid;
         process.name = *name;
+
+        const auto uid = readProcessUid(processDirectory);
+
+        if (uid.has_value()) {
+            process.uid = *uid;
+            process.username = lookupUsername(*uid);
+        }
 
         std::error_code fdError;
 

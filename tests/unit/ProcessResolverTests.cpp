@@ -64,6 +64,25 @@ TEST_CASE("Socket inode is correlated with its owning process")
         commFile << "python3\n";
     }
 
+    const auto currentUid =
+        static_cast<unsigned int>(::getuid());
+
+    {
+        std::ofstream statusFile {
+            processDirectory / "status"
+        };
+
+        REQUIRE(statusFile.is_open());
+
+        statusFile
+            << "Name:\tpython3\n"
+            << "Uid:\t"
+            << currentUid << '\t'
+            << currentUid << '\t'
+            << currentUid << '\t'
+            << currentUid << '\n';
+    }
+
     std::filesystem::create_symlink(
         "socket:[32808]",
         processDirectory / "fd" / "3"
@@ -90,4 +109,6 @@ TEST_CASE("Socket inode is correlated with its owning process")
     CHECK(process.pid == 4242);
     CHECK(process.name == "python3");
     CHECK(owners.size() == 1);
+    CHECK(process.uid == currentUid);
+    CHECK_FALSE(process.username.empty());
 }

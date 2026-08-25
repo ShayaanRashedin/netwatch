@@ -107,10 +107,17 @@ int main()
             for (const auto& process : owners->second) {
                 std::cout
                     << "  pid=" << process.pid
-                    << " process=" << process.name;
+                    << " process=" << process.name
+                    << " uid=" << process.uid;
+
+                if (!process.username.empty()) {
+                    std::cout
+                        << " user="
+                        << process.username;
+                }
             }
         }
-
+        
         std::cout << '\n';
     }
 }

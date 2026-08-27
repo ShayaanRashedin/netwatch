@@ -15,7 +15,7 @@ enum class TransportProtocol {
     Udp
 };
 
-enum class TcpState {
+enum class SocketState {
     Established,
     SynSent,
     SynReceived,
@@ -27,6 +27,8 @@ enum class TcpState {
     LastAck,
     Listen,
     Closing,
+    NewSynReceived,
+    Unconnected,
     Unknown
 };
 
@@ -42,11 +44,11 @@ struct SocketRecord {
     Endpoint local;
     Endpoint remote;
 
-    TcpState state {TcpState::Unknown};
+    SocketState state {SocketState::Unknown};
 
     std::uint64_t inode {};
     std::uint64_t tx_queue_bytes {};
     std::uint64_t rx_queue_bytes {};
 };
 
-}
+} // namespace netwatch

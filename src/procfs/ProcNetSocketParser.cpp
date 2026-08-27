@@ -1,5 +1,8 @@
 #include "netwatch/procfs/ProcNetSocketParser.hpp"
 
+#include <arpa/inet.h>
+
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -38,11 +41,8 @@ std::optional<std::uint16_t> parseHexPort(
 {
     const auto value = parseUnsigned(text, 16);
 
-    if (!value.has_value()) {
-        return std::nullopt;
-    }
-
-    if (*value > std::numeric_limits<std::uint16_t>::max()) {
+    if (!value.has_value()
+        || *value > std::numeric_limits<std::uint16_t>::max()) {
         return std::nullopt;
     }
 
@@ -52,19 +52,19 @@ std::optional<std::uint16_t> parseHexPort(
 std::optional<std::string> parseIPv4Address(
     const std::string_view text)
 {
-    if (text.size() != 8) {
+    if (text.size() != 8U) {
         return std::nullopt;
     }
 
     std::string address;
 
-    // /proc/net/tcp represents IPv4 bytes in little-endian order.
+    // procfs exposes IPv4 bytes in host-order hexadecimal.
     for (int byteIndex = 3; byteIndex >= 0; --byteIndex) {
         const std::size_t position =
             static_cast<std::size_t>(byteIndex) * 2U;
 
         const auto byte =
-            parseUnsigned(text.substr(position, 2), 16);
+            parseUnsigned(text.substr(position, 2U), 16);
 
         if (!byte.has_value() || *byte > 255U) {
             return std::nullopt;
@@ -80,8 +80,54 @@ std::optional<std::string> parseIPv4Address(
     return address;
 }
 
-std::optional<Endpoint> parseEndpoint(
+std::optional<std::string> parseIPv6Address(
     const std::string_view text)
+{
+    if (text.size() != 32U) {
+        return std::nullopt;
+    }
+
+    std::array<unsigned char, 16> bytes {};
+
+    // Each 32-bit word in the procfs IPv6 value is host ordered.
+    for (std::size_t wordIndex = 0; wordIndex < 4U; ++wordIndex) {
+        for (std::size_t byteIndex = 0; byteIndex < 4U; ++byteIndex) {
+            const std::size_t sourcePosition =
+                (wordIndex * 8U) + ((3U - byteIndex) * 2U);
+
+            const auto byte = parseUnsigned(
+                text.substr(sourcePosition, 2U),
+                16
+            );
+
+            if (!byte.has_value() || *byte > 255U) {
+                return std::nullopt;
+            }
+
+            bytes[(wordIndex * 4U) + byteIndex] =
+                static_cast<unsigned char>(*byte);
+        }
+    }
+
+    std::array<char, INET6_ADDRSTRLEN> address {};
+
+    const auto* result = ::inet_ntop(
+        AF_INET6,
+        bytes.data(),
+        address.data(),
+        static_cast<socklen_t>(address.size())
+    );
+
+    if (result == nullptr) {
+        return std::nullopt;
+    }
+
+    return std::string {address.data()};
+}
+
+std::optional<Endpoint> parseEndpoint(
+    const std::string_view text,
+    const IpFamily family)
 {
     const std::size_t separator = text.find(':');
 
@@ -93,9 +139,13 @@ std::optional<Endpoint> parseEndpoint(
         text.substr(0, separator);
 
     const std::string_view portText =
-        text.substr(separator + 1);
+        text.substr(separator + 1U);
 
-    const auto address = parseIPv4Address(addressText);
+    const auto address =
+        family == IpFamily::IPv4
+            ? parseIPv4Address(addressText)
+            : parseIPv6Address(addressText);
+
     const auto port = parseHexPort(portText);
 
     if (!address.has_value() || !port.has_value()) {
@@ -109,53 +159,71 @@ std::optional<Endpoint> parseEndpoint(
     return endpoint;
 }
 
-TcpState parseTcpState(const std::string_view state)
+SocketState parseSocketState(
+    const std::string_view state,
+    const TransportProtocol protocol)
 {
+    if (protocol == TransportProtocol::Udp) {
+        if (state == "01") {
+            return SocketState::Established;
+        }
+
+        if (state == "07") {
+            return SocketState::Unconnected;
+        }
+
+        return SocketState::Unknown;
+    }
+
     if (state == "01") {
-        return TcpState::Established;
+        return SocketState::Established;
     }
 
     if (state == "02") {
-        return TcpState::SynSent;
+        return SocketState::SynSent;
     }
 
     if (state == "03") {
-        return TcpState::SynReceived;
+        return SocketState::SynReceived;
     }
 
     if (state == "04") {
-        return TcpState::FinWait1;
+        return SocketState::FinWait1;
     }
 
     if (state == "05") {
-        return TcpState::FinWait2;
+        return SocketState::FinWait2;
     }
 
     if (state == "06") {
-        return TcpState::TimeWait;
+        return SocketState::TimeWait;
     }
 
     if (state == "07") {
-        return TcpState::Closed;
+        return SocketState::Closed;
     }
 
     if (state == "08") {
-        return TcpState::CloseWait;
+        return SocketState::CloseWait;
     }
 
     if (state == "09") {
-        return TcpState::LastAck;
+        return SocketState::LastAck;
     }
 
     if (state == "0A") {
-        return TcpState::Listen;
+        return SocketState::Listen;
     }
 
     if (state == "0B") {
-        return TcpState::Closing;
+        return SocketState::Closing;
     }
 
-    return TcpState::Unknown;
+    if (state == "0C") {
+        return SocketState::NewSynReceived;
+    }
+
+    return SocketState::Unknown;
 }
 
 std::optional<std::pair<std::uint64_t, std::uint64_t>>
@@ -171,7 +239,7 @@ parseQueueSizes(const std::string_view text)
         parseUnsigned(text.substr(0, separator), 16);
 
     const auto rxQueue =
-        parseUnsigned(text.substr(separator + 1), 16);
+        parseUnsigned(text.substr(separator + 1U), 16);
 
     if (!txQueue.has_value() || !rxQueue.has_value()) {
         return std::nullopt;
@@ -194,16 +262,16 @@ std::optional<SocketRecord> parseSocketLine(
         fields.push_back(field);
     }
 
-    // We need fields through the inode column.
-    if (fields.size() < 10) {
+    // Fields through index 9 are required to reach the inode column.
+    if (fields.size() < 10U) {
         return std::nullopt;
     }
 
-    const auto local = parseEndpoint(fields[1]);
-    const auto remote = parseEndpoint(fields[2]);
+    const auto local = parseEndpoint(fields[1], family);
+    const auto remote = parseEndpoint(fields[2], family);
     const auto queues = parseQueueSizes(fields[4]);
 
-    // The inode field is decimal, unlike many other procfs fields here.
+    // The inode field is decimal; most address-table fields are hexadecimal.
     const auto inode = parseUnsigned(fields[9], 10);
 
     if (!local.has_value()
@@ -217,15 +285,11 @@ std::optional<SocketRecord> parseSocketLine(
 
     record.family = family;
     record.protocol = protocol;
-
     record.local = *local;
     record.remote = *remote;
-
-    record.state = parseTcpState(fields[3]);
-
+    record.state = parseSocketState(fields[3], protocol);
     record.tx_queue_bytes = queues->first;
     record.rx_queue_bytes = queues->second;
-
     record.inode = *inode;
 
     return record;
@@ -239,15 +303,9 @@ std::vector<SocketRecord> ProcNetSocketParser::parse(
     const TransportProtocol protocol) const
 {
     std::vector<SocketRecord> records;
-
-    // Current implementation supports IPv4 only.
-    if (family != IpFamily::IPv4) {
-        return records;
-    }
-
     std::string line;
 
-    // Skip the column-header line.
+    // Every procfs socket table begins with one column-header line.
     if (!std::getline(input, line)) {
         return records;
     }
@@ -268,4 +326,4 @@ std::vector<SocketRecord> ProcNetSocketParser::parse(
     return records;
 }
 
-}
+} // namespace netwatch

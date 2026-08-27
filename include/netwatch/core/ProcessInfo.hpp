@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace netwatch {
 
@@ -16,5 +18,11 @@ struct ProcessInfo {
     std::string executable;
     std::string command_line;
 };
+
+using SocketOwnerMap =
+    std::unordered_map<
+        std::uint64_t,
+        std::vector<ProcessInfo>
+    >;
 
 } // namespace netwatch

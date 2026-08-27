@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <vector>
 #include <iterator>
+#include <sstream>
 
 namespace netwatch {
 
@@ -214,6 +215,65 @@ std::string readProcessCommandLine(
     return commandLine;
 }
 
+std::optional<std::uint64_t> readProcessStartTimeTicks(
+    const std::filesystem::path& processDirectory)
+{
+    std::ifstream input {
+        processDirectory / "stat"
+    };
+
+    std::string line;
+
+    if (!std::getline(input, line)) {
+        return std::nullopt;
+    }
+
+    // The process name is enclosed in parentheses and may contain spaces.
+    const auto closingParenthesis = line.rfind(')');
+
+    if (closingParenthesis == std::string::npos
+        || closingParenthesis + 2U >= line.size()) {
+        return std::nullopt;
+    }
+
+    std::istringstream fields {
+        line.substr(closingParenthesis + 2U)
+    };
+
+    std::string field;
+
+    // The stream begins at field 3. Start time is field 22.
+    for (int fieldNumber = 3;
+         fieldNumber <= 22;
+         ++fieldNumber) {
+        if (!(fields >> field)) {
+            return std::nullopt;
+        }
+
+        if (fieldNumber != 22) {
+            continue;
+        }
+
+        std::uint64_t startTimeTicks {};
+
+        const auto [ptr, error] = std::from_chars(
+            field.data(),
+            field.data() + field.size(),
+            startTimeTicks
+        );
+
+        if (error != std::errc {}
+            || ptr != field.data() + field.size()) {
+            return std::nullopt;
+        }
+
+        return startTimeTicks;
+    }
+
+    return std::nullopt;
+    
+}
+
 } // namespace
 
 ProcessResolver::ProcessResolver(
@@ -276,6 +336,14 @@ ProcessResolver::resolveSocketOwners() const
         process.command_line =
             readProcessCommandLine(processDirectory);
 
+        const auto startTimeTicks =
+            readProcessStartTimeTicks(processDirectory);
+
+        if (startTimeTicks.has_value()) {
+            process.start_time_ticks =
+                *startTimeTicks;
+        }
+        
         std::error_code fdError;
 
         std::filesystem::directory_iterator fdIterator {

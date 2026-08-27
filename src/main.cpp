@@ -128,6 +128,12 @@ int main()
                         << process.command_line
                         << '"';
                 }
+                
+                if (process.start_time_ticks != 0U) {
+                    std::cout
+                        << " start_ticks="
+                        << process.start_time_ticks;
+                }
             }
         }
 

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     NetWatch
-    VERSION 0.1.0
+    VERSION 0.2.0
     DESCRIPTION "Linux network and process observability agent"
     LANGUAGES CXX
 )
@@ -23,6 +23,8 @@ function(netwatch_enable_warnings target_name)
 endfunction()
 
 add_library(netwatch_core
+    src/core/SocketSnapshot.cpp
+    src/monitoring/SnapshotDiffer.cpp
     src/procfs/ProcNetSocketParser.cpp
     src/procfs/ProcSocketCollector.cpp
     src/procfs/ProcessResolver.cpp
@@ -62,6 +64,8 @@ if(BUILD_TESTING)
         tests/unit/ProcNetSocketParserTests.cpp
         tests/unit/ProcSocketCollectorTests.cpp
         tests/unit/ProcessResolverTests.cpp
+        tests/unit/SnapshotDifferTests.cpp
+        tests/unit/SocketSnapshotTests.cpp
     )
 
     target_link_libraries(netwatch_tests PRIVATE

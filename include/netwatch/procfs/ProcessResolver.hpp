@@ -2,20 +2,13 @@
 
 #include "netwatch/core/ProcessInfo.hpp"
 
-#include <cstdint>
 #include <filesystem>
-#include <unordered_map>
-#include <vector>
 
 namespace netwatch {
 
 class ProcessResolver {
 public:
-    using SocketOwnerMap =
-        std::unordered_map<
-            std::uint64_t,
-            std::vector<ProcessInfo>
-        >;
+    using SocketOwnerMap = netwatch::SocketOwnerMap;
 
     explicit ProcessResolver(
         std::filesystem::path procRoot = "/proc"

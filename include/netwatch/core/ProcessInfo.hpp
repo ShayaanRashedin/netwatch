@@ -1,14 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace netwatch {
 
 struct ProcessInfo {
     int pid {};
-    std::uint64_t start_time_ticks {};
-    unsigned int uid {};
+    std::optional<std::uint64_t> start_time_ticks;
+    std::optional<unsigned int> uid;
 
     std::string username;
     std::string name;

@@ -1,142 +1,205 @@
-#include "netwatch/procfs/ProcNetSocketParser.hpp"
+#include "netwatch/core/NetworkTypes.hpp"
+#include "netwatch/core/ProcessInfo.hpp"
 #include "netwatch/procfs/ProcessResolver.hpp"
+#include "netwatch/procfs/ProcSocketCollector.hpp"
 
-#include <fstream>
 #include <iostream>
 #include <string_view>
 
 namespace {
 
-std::string_view tcpStateToString(
-    const netwatch::TcpState state)
+std::string_view familyToString(
+    const netwatch::IpFamily family)
 {
-    using netwatch::TcpState;
+    switch (family) {
+    case netwatch::IpFamily::IPv4:
+        return "IPv4";
+
+    case netwatch::IpFamily::IPv6:
+        return "IPv6";
+    }
+
+    return "UNKNOWN";
+}
+
+std::string_view protocolToString(
+    const netwatch::TransportProtocol protocol)
+{
+    switch (protocol) {
+    case netwatch::TransportProtocol::Tcp:
+        return "TCP";
+
+    case netwatch::TransportProtocol::Udp:
+        return "UDP";
+    }
+
+    return "UNKNOWN";
+}
+
+std::string_view socketStateToString(
+    const netwatch::SocketState state)
+{
+    using netwatch::SocketState;
 
     switch (state) {
-    case TcpState::Established:
+    case SocketState::Established:
         return "ESTABLISHED";
 
-    case TcpState::SynSent:
+    case SocketState::SynSent:
         return "SYN_SENT";
 
-    case TcpState::SynReceived:
+    case SocketState::SynReceived:
         return "SYN_RECV";
 
-    case TcpState::FinWait1:
+    case SocketState::FinWait1:
         return "FIN_WAIT1";
 
-    case TcpState::FinWait2:
+    case SocketState::FinWait2:
         return "FIN_WAIT2";
 
-    case TcpState::TimeWait:
+    case SocketState::TimeWait:
         return "TIME_WAIT";
 
-    case TcpState::Closed:
+    case SocketState::Closed:
         return "CLOSED";
 
-    case TcpState::CloseWait:
+    case SocketState::CloseWait:
         return "CLOSE_WAIT";
 
-    case TcpState::LastAck:
+    case SocketState::LastAck:
         return "LAST_ACK";
 
-    case TcpState::Listen:
+    case SocketState::Listen:
         return "LISTEN";
 
-    case TcpState::Closing:
+    case SocketState::Closing:
         return "CLOSING";
 
-    case TcpState::Unknown:
+    case SocketState::NewSynReceived:
+        return "NEW_SYN_RECV";
+
+    case SocketState::Unconnected:
+        return "UNCONN";
+
+    case SocketState::Unknown:
         return "UNKNOWN";
     }
 
     return "UNKNOWN";
 }
 
+void printEndpoint(
+    const netwatch::Endpoint& endpoint,
+    const netwatch::IpFamily family)
+{
+    if (family == netwatch::IpFamily::IPv6) {
+        std::cout
+            << '['
+            << endpoint.address
+            << "]:"
+            << endpoint.port;
+
+        return;
+    }
+
+    std::cout
+        << endpoint.address
+        << ':'
+        << endpoint.port;
+}
+
+void printProcess(const netwatch::ProcessInfo& process)
+{
+    std::cout
+        << " owner={pid="
+        << process.pid
+        << " process="
+        << process.name;
+
+    if (process.uid.has_value()) {
+        std::cout
+            << " uid="
+            << *process.uid;
+    }
+
+    if (!process.username.empty()) {
+        std::cout
+            << " user="
+            << process.username;
+    }
+
+    if (!process.executable.empty()) {
+        std::cout
+            << " exe="
+            << process.executable;
+    }
+
+    if (!process.command_line.empty()) {
+        std::cout
+            << " cmd=\""
+            << process.command_line
+            << '"';
+    }
+
+    if (process.start_time_ticks.has_value()) {
+        std::cout
+            << " start_ticks="
+            << *process.start_time_ticks;
+    }
+
+    std::cout << '}';
+}
+
 } // namespace
 
 int main()
 {
-    std::ifstream tcpFile {"/proc/net/tcp"};
-
-    if (!tcpFile.is_open()) {
-        std::cerr
-            << "Failed to open /proc/net/tcp\n";
-
-        return 1;
-    }
-
-    netwatch::ProcNetSocketParser parser;
-
-    const auto sockets = parser.parse(
-        tcpFile,
-        netwatch::IpFamily::IPv4,
-        netwatch::TransportProtocol::Tcp
-    );
+    netwatch::ProcSocketCollector collector;
+    const auto sockets = collector.collect();
 
     netwatch::ProcessResolver processResolver;
     const auto socketOwners =
         processResolver.resolveSocketOwners();
 
     std::cout
-        << "NetWatch IPv4 TCP snapshot\n"
+        << "NetWatch socket snapshot\n"
         << "Sockets found: "
         << sockets.size()
         << "\n\n";
 
     for (const auto& socket : sockets) {
         std::cout
-            << "TCP "
-            << socket.local.address
-            << ':'
-            << socket.local.port
-            << " -> "
-            << socket.remote.address
-            << ':'
-            << socket.remote.port
-            << "  "
-            << tcpStateToString(socket.state)
-            << "  inode="
-            << socket.inode;
+            << protocolToString(socket.protocol)
+            << ' '
+            << familyToString(socket.family)
+            << ' ';
+
+        printEndpoint(socket.local, socket.family);
+        std::cout << " -> ";
+        printEndpoint(socket.remote, socket.family);
+
+        std::cout
+            << ' '
+            << socketStateToString(socket.state)
+            << " inode="
+            << socket.inode
+            << " tx="
+            << socket.tx_queue_bytes
+            << " rx="
+            << socket.rx_queue_bytes;
 
         const auto owners = socketOwners.find(socket.inode);
 
         if (owners == socketOwners.end()) {
-            std::cout << "  owner=unknown";
+            std::cout << " owner=unknown";
         } else {
             for (const auto& process : owners->second) {
-                std::cout
-                    << "  pid=" << process.pid
-                    << " process=" << process.name
-                    << " uid=" << process.uid;
-
-                if (!process.username.empty()) {
-                    std::cout
-                        << " user="
-                        << process.username;
-                }
-
-                if (!process.executable.empty()) {
-                    std::cout
-                        << " exe="
-                        << process.executable;
-                }
-
-                if (!process.command_line.empty()) {
-                    std::cout
-                        << " cmd=\""
-                        << process.command_line
-                        << '"';
-                }
-                
-                if (process.start_time_ticks != 0U) {
-                    std::cout
-                        << " start_ticks="
-                        << process.start_time_ticks;
-                }
+                printProcess(process);
             }
         }
 
         std::cout << '\n';
     }
+
+    return 0;
 }

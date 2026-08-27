@@ -2,9 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unistd.h>
 
@@ -42,27 +45,55 @@ private:
     std::filesystem::path root_;
 };
 
-} // namespace
-
-TEST_CASE("Socket inode is correlated with its owning process")
+void writeFile(
+    const std::filesystem::path& path,
+    const std::string_view content)
 {
-    TemporaryProcTree procTree;
+    std::ofstream output {path};
 
+    REQUIRE(output.is_open());
+    output << content;
+}
+
+std::filesystem::path createProcess(
+    const std::filesystem::path& root,
+    const int pid,
+    const std::string_view name)
+{
     const auto processDirectory =
-        procTree.root() / "4242";
+        root / std::to_string(pid);
 
     std::filesystem::create_directories(
         processDirectory / "fd"
     );
 
-    {
-        std::ofstream commFile {
-            processDirectory / "comm"
-        };
+    writeFile(
+        processDirectory / "comm",
+        std::string {name} + '\n'
+    );
 
-        REQUIRE(commFile.is_open());
-        commFile << "python3\n";
-    }
+    return processDirectory;
+}
+
+void createSocketLink(
+    const std::filesystem::path& processDirectory,
+    const std::string_view fileDescriptor,
+    const std::uint64_t inode)
+{
+    std::filesystem::create_symlink(
+        "socket:[" + std::to_string(inode) + ']',
+        processDirectory / "fd" / std::string {fileDescriptor}
+    );
+}
+
+} // namespace
+
+TEST_CASE("Socket inode is correlated with complete process metadata")
+{
+    TemporaryProcTree procTree;
+
+    const auto processDirectory =
+        createProcess(procTree.root(), 4242, "python3");
 
     const auto currentUid =
         static_cast<unsigned int>(::getuid());
@@ -83,10 +114,7 @@ TEST_CASE("Socket inode is correlated with its owning process")
             << currentUid << '\n';
     }
 
-    std::filesystem::create_symlink(
-        "socket:[32808]",
-        processDirectory / "fd" / "3"
-    );
+    createSocketLink(processDirectory, "3", 32808U);
 
     std::filesystem::create_symlink(
         "/tmp/not-a-socket",
@@ -108,53 +136,149 @@ TEST_CASE("Socket inode is correlated with its owning process")
 
         commandLineFile << "python3";
         commandLineFile.put('\0');
-
         commandLineFile << "-m";
         commandLineFile.put('\0');
-
         commandLineFile << "http.server";
         commandLineFile.put('\0');
-
         commandLineFile << "8080";
         commandLineFile.put('\0');
     }
 
-    {
-        std::ofstream statFile {
-            processDirectory / "stat"
-        };
+    writeFile(
+        processDirectory / "stat",
+        "4242 (python worker) S "
+        "1 2 3 4 5 6 7 8 9 "
+        "10 11 12 13 14 15 16 17 18 "
+        "987654 0\n"
+    );
 
-        REQUIRE(statFile.is_open());
+    netwatch::ProcessResolver resolver {procTree.root()};
 
-        statFile
-            << "4242 (python worker) S "
-            << "1 2 3 4 5 6 7 8 9 "
-            << "10 11 12 13 14 15 16 17 18 "
-            << "987654 0\n";
-    }
+    const auto owners = resolver.resolveSocketOwners();
 
-    netwatch::ProcessResolver resolver {
-        procTree.root()
-    };
+    REQUIRE(owners.contains(32808U));
+    REQUIRE(owners.at(32808U).size() == 1U);
 
-    const auto owners =
-        resolver.resolveSocketOwners();
-
-    REQUIRE(owners.contains(32808));
-    REQUIRE(owners.at(32808).size() == 1);
-
-    const auto& process =
-        owners.at(32808).front();
+    const auto& process = owners.at(32808U).front();
 
     CHECK(process.pid == 4242);
     CHECK(process.name == "python3");
-    CHECK(owners.size() == 1);
-    CHECK(process.uid == currentUid);
-    CHECK(process.executable == "/usr/bin/python3");
-    CHECK(
-        process.command_line
-        == "python3 -m http.server 8080"
-    ); 
+
+    REQUIRE(process.uid.has_value());
+    CHECK(*process.uid == currentUid);
     CHECK_FALSE(process.username.empty());
-    CHECK(process.start_time_ticks == 987'654U);
+
+    CHECK(process.executable == "/usr/bin/python3");
+    CHECK(process.command_line == "python3 -m http.server 8080");
+
+    REQUIRE(process.start_time_ticks.has_value());
+    CHECK(*process.start_time_ticks == 987654U);
+}
+
+TEST_CASE("Duplicate file descriptors produce one owner record")
+{
+    TemporaryProcTree procTree;
+
+    const auto processDirectory =
+        createProcess(procTree.root(), 101, "worker");
+
+    createSocketLink(processDirectory, "3", 700U);
+    createSocketLink(processDirectory, "4", 700U);
+
+    netwatch::ProcessResolver resolver {procTree.root()};
+    const auto owners = resolver.resolveSocketOwners();
+
+    REQUIRE(owners.contains(700U));
+    REQUIRE(owners.at(700U).size() == 1U);
+    CHECK(owners.at(700U).front().pid == 101);
+}
+
+TEST_CASE("Shared socket inode retains every owning process")
+{
+    TemporaryProcTree procTree;
+
+    const auto firstProcess =
+        createProcess(procTree.root(), 101, "first");
+
+    const auto secondProcess =
+        createProcess(procTree.root(), 202, "second");
+
+    createSocketLink(firstProcess, "3", 900U);
+    createSocketLink(secondProcess, "7", 900U);
+
+    netwatch::ProcessResolver resolver {procTree.root()};
+    const auto owners = resolver.resolveSocketOwners();
+
+    REQUIRE(owners.contains(900U));
+    REQUIRE(owners.at(900U).size() == 2U);
+
+    std::set<int> pids;
+
+    for (const auto& process : owners.at(900U)) {
+        pids.insert(process.pid);
+    }
+
+    CHECK(pids == std::set<int> {101, 202});
+}
+
+TEST_CASE("Malformed procfs entries are ignored")
+{
+    TemporaryProcTree procTree;
+
+    std::filesystem::create_directories(
+        procTree.root() / "self"
+    );
+
+    const auto malformedProcess =
+        createProcess(procTree.root(), 303, "malformed");
+
+    std::filesystem::create_symlink(
+        "socket:[not-a-number]",
+        malformedProcess / "fd" / "3"
+    );
+
+    std::filesystem::create_symlink(
+        "/tmp/ordinary-file",
+        malformedProcess / "fd" / "4"
+    );
+
+    const auto missingNameProcess =
+        procTree.root() / "404";
+
+    std::filesystem::create_directories(
+        missingNameProcess / "fd"
+    );
+
+    createSocketLink(missingNameProcess, "5", 123U);
+
+    netwatch::ProcessResolver resolver {procTree.root()};
+    const auto owners = resolver.resolveSocketOwners();
+
+    CHECK(owners.empty());
+}
+
+TEST_CASE("Missing optional metadata does not hide a socket owner")
+{
+    TemporaryProcTree procTree;
+
+    const auto processDirectory =
+        createProcess(procTree.root(), 505, "minimal");
+
+    createSocketLink(processDirectory, "8", 321U);
+
+    netwatch::ProcessResolver resolver {procTree.root()};
+    const auto owners = resolver.resolveSocketOwners();
+
+    REQUIRE(owners.contains(321U));
+    REQUIRE(owners.at(321U).size() == 1U);
+
+    const auto& process = owners.at(321U).front();
+
+    CHECK(process.pid == 505);
+    CHECK(process.name == "minimal");
+    CHECK_FALSE(process.uid.has_value());
+    CHECK(process.username.empty());
+    CHECK(process.executable.empty());
+    CHECK(process.command_line.empty());
+    CHECK_FALSE(process.start_time_ticks.has_value());
 }

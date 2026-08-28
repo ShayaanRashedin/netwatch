@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     NetWatch
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "Linux network and process observability agent"
     LANGUAGES CXX
 )
@@ -10,6 +10,9 @@ project(
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
 
 function(netwatch_enable_warnings target_name)
     target_compile_options(${target_name} PRIVATE
@@ -25,13 +28,20 @@ endfunction()
 add_library(netwatch_core
     src/core/SocketSnapshot.cpp
     src/monitoring/SnapshotDiffer.cpp
+    src/persistence/EventWriter.cpp
     src/procfs/ProcNetSocketParser.cpp
     src/procfs/ProcSocketCollector.cpp
     src/procfs/ProcessResolver.cpp
+    src/storage/SQLiteEventRepository.cpp
 )
 
 target_include_directories(netwatch_core PUBLIC
     ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(netwatch_core PUBLIC
+    SQLite::SQLite3
+    Threads::Threads
 )
 
 netwatch_enable_warnings(netwatch_core)
@@ -61,11 +71,14 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2)
 
     add_executable(netwatch_tests
+        tests/unit/BoundedQueueTests.cpp
+        tests/unit/EventWriterTests.cpp
         tests/unit/ProcNetSocketParserTests.cpp
         tests/unit/ProcSocketCollectorTests.cpp
         tests/unit/ProcessResolverTests.cpp
         tests/unit/SnapshotDifferTests.cpp
         tests/unit/SocketSnapshotTests.cpp
+        tests/unit/SQLiteEventRepositoryTests.cpp
     )
 
     target_link_libraries(netwatch_tests PRIVATE
@@ -78,3 +91,4 @@ if(BUILD_TESTING)
     include(Catch)
     catch_discover_tests(netwatch_tests)
 endif()
+

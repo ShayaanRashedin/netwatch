@@ -35,6 +35,8 @@ ubsan.log*
 *.db-shm
 *.db-wal
 logs/
+dist/
+demo-data/
 
 # Python
 __pycache__/
@@ -49,3 +51,4 @@ __pycache__/
 # Operating systems
 .DS_Store
 Thumbs.db
+

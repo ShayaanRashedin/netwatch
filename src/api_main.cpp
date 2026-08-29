@@ -13,8 +13,8 @@
 #include <system_error>
 #include <thread>
 
-#ifndef NETWATCH_WEB_ROOT
-#define NETWATCH_WEB_ROOT "web"
+#ifndef NETWATCH_DEVELOPMENT_WEB_ROOT
+#define NETWATCH_DEVELOPMENT_WEB_ROOT "web"
 #endif
 
 namespace {
@@ -26,12 +26,42 @@ void handleStopSignal(const int)
     stopRequested = 1;
 }
 
+std::filesystem::path defaultWebRoot()
+{
+    std::error_code error;
+    const auto executable = std::filesystem::read_symlink(
+        "/proc/self/exe",
+        error
+    );
+
+    if (!error) {
+        const auto executableDirectory = executable.parent_path();
+        const std::filesystem::path candidates[] {
+            executableDirectory / "share" / "netwatch" / "web",
+            executableDirectory.parent_path()
+                / "share" / "netwatch" / "web"
+        };
+
+        for (const auto& candidate : candidates) {
+            if (std::filesystem::is_regular_file(
+                    candidate / "index.html",
+                    error)) {
+                return candidate;
+            }
+            error.clear();
+        }
+    }
+
+    return NETWATCH_DEVELOPMENT_WEB_ROOT;
+}
+
 struct Options {
     std::filesystem::path database {"netwatch.db"};
-    std::filesystem::path web_root {NETWATCH_WEB_ROOT};
+    std::filesystem::path web_root {defaultWebRoot()};
     std::string address {"127.0.0.1"};
     std::uint16_t port {8088U};
     bool help {};
+    bool version {};
 };
 
 std::string_view requireValue(
@@ -61,6 +91,11 @@ Options parseOptions(const int argc, char* argv[])
 
         if (argument == "--help" || argument == "-h") {
             options.help = true;
+            continue;
+        }
+
+        if (argument == "--version") {
+            options.version = true;
             continue;
         }
 
@@ -163,6 +198,7 @@ void printUsage()
         << "  --port VALUE     HTTP port"
         << " (default: 8088)\n"
         << "  --web-root PATH  Dashboard asset directory\n"
+        << "  --version        Show the NetWatch version\n"
         << "  --help, -h       Show this help\n";
 }
 
@@ -226,6 +262,11 @@ int main(const int argc, char* argv[])
 
         if (options.help) {
             printUsage();
+            return 0;
+        }
+
+        if (options.version) {
+            std::cout << "NetWatch API " << NETWATCH_VERSION << '\n';
             return 0;
         }
 

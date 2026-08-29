@@ -1,6 +1,9 @@
 # NetWatch
 
 [![CI](https://github.com/ShayaanRashedin/netwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/ShayaanRashedin/netwatch/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ShayaanRashedin/netwatch?display_name=tag)](https://github.com/ShayaanRashedin/netwatch/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C.svg)](https://isocpp.org/)
 
 NetWatch is a Linux network and process observability agent written in modern
 C++. It collects TCP and UDP sockets across IPv4 and IPv6, correlates them with
@@ -12,6 +15,21 @@ The project is a production-oriented observability pipeline rather than a
 wrapper around `ss` or `netstat`. Collection, deterministic event detection,
 behavioral analysis, bounded backpressure, and durable storage are separate
 components with dedicated tests.
+
+## Engineering highlights
+
+- **End-to-end systems design:** kernel procfs data becomes normalized domain
+  models, deterministic events, explainable alerts, durable records, and a
+  live UI without coupling those stages together.
+- **Correctness under load:** a bounded queue makes backpressure explicit, a
+  dedicated writer drains safely on shutdown, and each event plus its alerts
+  is committed transactionally.
+- **Production-aware security:** the public surface is read-only, validates
+  bounds, sends restrictive browser headers, defaults to loopback, and ships
+  with hardened service definitions.
+- **Repeatable delivery:** strict-warning CI, 50 deterministic tests, an
+  installed-artifact smoke test, Docker validation, CPack archives, checksums,
+  and tag-driven releases exercise more than the development build.
 
 ## Current capabilities
 
@@ -42,6 +60,9 @@ components with dedicated tests.
 - Validates and bounds every public API query parameter
 - Applies restrictive browser security headers and binds to loopback by default
 - Runs strict-warning builds and deterministic tests in GitHub Actions
+- Installs versioned binaries and dashboard assets with CMake/CPack
+- Ships hardened systemd services and a Linux host-observability Compose stack
+- Publishes checksum-protected release archives from version tags
 
 ## Architecture
 
@@ -125,9 +146,16 @@ sudo apt install -y build-essential cmake ninja-build git libsqlite3-dev sqlite3
 ## Build and test
 
 ```bash
-cmake -S . -B build/debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/debug
-ctest --test-dir build/debug --output-on-failure
+cmake --preset debug
+cmake --build --preset debug
+ctest --preset debug
+```
+
+Confirm the runtime version:
+
+```bash
+./build/debug/netwatch --version
+./build/debug/netwatch_api --version
 ```
 
 ## Run
@@ -213,6 +241,40 @@ Use a different bind address or port when required:
 Loopback is the secure default. Binding to `0.0.0.0` exposes the dashboard to
 the network and should only be done behind appropriate host/network controls.
 
+## Controlled demo
+
+Generate a reproducible HIGH alert for a temporary TCP listener and open the
+result in the dashboard:
+
+```bash
+./scripts/demo.sh
+```
+
+The demo uses an isolated temporary database and removes it when stopped. See
+[the demo walkthrough](docs/DEMO.md) for expected evidence and prerequisites.
+
+## Install and deploy
+
+Create an optimized native installation:
+
+```bash
+cmake --preset release
+cmake --build --preset release
+sudo cmake --install build/release
+sudo /usr/share/netwatch/scripts/install-systemd.sh
+```
+
+Or evaluate the Linux container stack:
+
+```bash
+docker compose up --build -d
+curl --fail http://127.0.0.1:8088/api/health
+```
+
+The systemd configuration, container permissions, persistence model, upgrade
+path, and release archive procedure are documented in
+[the deployment guide](docs/DEPLOYMENT.md).
+
 ## REST API
 
 | Endpoint | Description |
@@ -257,6 +319,9 @@ src/detection/                 Detection rules and explainable scoring
 src/storage/                   SQLite schema, retention, and history queries
 tests/unit/                    Deterministic unit, storage, and concurrency tests
 web/                           Dependency-free responsive dashboard
+packaging/systemd/             Hardened native service definitions
+scripts/                       Installation, smoke-test, and demo automation
+docs/                          Deployment and demonstration guides
 .github/workflows/             Continuous integration
 ```
 
@@ -272,11 +337,15 @@ web/                           Dependency-free responsive dashboard
 - [x] Alert/evidence persistence and filtered history
 - [x] Unit tests and Linux CI
 - [x] Read-only REST API and live dashboard
-- [ ] systemd service, container packaging, demo, and release documentation
+- [x] systemd service, container packaging, demo, and release documentation
+- [x] Installable release archive and automated artifact smoke test
+- [x] MIT license, security policy, and contribution guide
 
 ## Status
 
-NetWatch now provides a working collection-to-detection-to-storage-to-dashboard
-pipeline. The final milestone focuses on systemd service deployment, container
-packaging, demo assets, and release documentation.
+NetWatch 1.0 is feature-complete: a tested Linux
+collection-to-detection-to-storage-to-dashboard pipeline with native and
+container deployment paths. See [CHANGELOG.md](CHANGELOG.md) for the release
+scope, [SECURITY.md](SECURITY.md) for operational boundaries, and
+[CONTRIBUTING.md](CONTRIBUTING.md) for development standards.
 

@@ -233,7 +233,7 @@ ApiResponse ApiService::health() const
     return jsonResponse(Json {
         {"status", "ok"},
         {"service", "netwatch-api"},
-        {"version", "0.5.0"},
+        {"version", NETWATCH_VERSION},
         {"generated_at", formatTimestamp(
             std::chrono::system_clock::now()
         )}

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     NetWatch
-    VERSION 0.5.0
+    VERSION 1.0.0
     DESCRIPTION "Linux network and process observability agent"
     LANGUAGES CXX
 )
@@ -15,6 +15,7 @@ find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
 
 include(FetchContent)
+include(GNUInstallDirs)
 
 set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
 set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
@@ -74,6 +75,10 @@ target_link_libraries(netwatch_core PUBLIC
     Threads::Threads
 )
 
+target_compile_definitions(netwatch_core PUBLIC
+    NETWATCH_VERSION="${PROJECT_VERSION}"
+)
+
 netwatch_enable_warnings(netwatch_core)
 
 add_executable(netwatch
@@ -108,7 +113,7 @@ add_executable(netwatch_api
 )
 
 target_compile_definitions(netwatch_api PRIVATE
-    NETWATCH_WEB_ROOT="${PROJECT_SOURCE_DIR}/web"
+    NETWATCH_DEVELOPMENT_WEB_ROOT="${PROJECT_SOURCE_DIR}/web"
 )
 
 target_link_libraries(netwatch_api PRIVATE
@@ -154,4 +159,81 @@ if(BUILD_TESTING)
     include(Catch)
     catch_discover_tests(netwatch_tests)
 endif()
+
+install(
+    TARGETS netwatch netwatch_api
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT Runtime
+)
+
+install(
+    DIRECTORY web/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/netwatch/web
+    COMPONENT Runtime
+)
+
+install(
+    DIRECTORY packaging/systemd/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/netwatch/systemd
+    COMPONENT Runtime
+    FILES_MATCHING PATTERN "*.service"
+)
+
+install(
+    FILES packaging/systemd/netwatch.env
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/netwatch/examples
+    COMPONENT Runtime
+)
+
+install(
+    PROGRAMS
+        scripts/demo.sh
+        scripts/install-systemd.sh
+        scripts/smoke-test.sh
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/netwatch/scripts
+    COMPONENT Runtime
+)
+
+install(
+    FILES
+        README.md
+        CHANGELOG.md
+        CONTRIBUTING.md
+        LICENSE
+        SECURITY.md
+        THIRD_PARTY_NOTICES.md
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT Runtime
+)
+
+install(
+    FILES ${cpp_httplib_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/licenses
+    RENAME cpp-httplib.txt
+    COMPONENT Runtime
+)
+
+install(
+    FILES ${nlohmann_json_SOURCE_DIR}/LICENSE.MIT
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/licenses
+    RENAME nlohmann-json.txt
+    COMPONENT Runtime
+)
+
+set(CPACK_PACKAGE_NAME "netwatch")
+set(CPACK_PACKAGE_VENDOR "ShayaanRashedin")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "${PROJECT_DESCRIPTION}")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME
+    "netwatch-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}"
+)
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${PROJECT_SOURCE_DIR}/README.md")
+set(CPACK_GENERATOR TGZ)
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+set(CPACK_STRIP_FILES TRUE)
+
+include(CPack)
 

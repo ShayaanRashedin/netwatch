@@ -1,0 +1,34 @@
+[Unit]
+Description=NetWatch network observability agent
+Documentation=https://github.com/ShayaanRashedin/netwatch
+After=local-fs.target
+ConditionPathIsDirectory=/proc
+
+[Service]
+Type=simple
+User=root
+Group=netwatch
+EnvironmentFile=-/etc/netwatch/netwatch.env
+ExecStart=/usr/bin/netwatch --database ${NETWATCH_DATABASE} --interval-ms ${NETWATCH_INTERVAL_MS} --queue-capacity ${NETWATCH_QUEUE_CAPACITY} --retention-days ${NETWATCH_RETENTION_DAYS}
+Restart=on-failure
+RestartSec=3s
+StateDirectory=netwatch
+StateDirectoryMode=0770
+UMask=0007
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/netwatch
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,62 @@
+name: netwatch
+
+services:
+  agent:
+    build:
+      context: .
+    image: netwatch:local
+    command:
+      - netwatch
+      - --database
+      - /var/lib/netwatch/netwatch.db
+      - --interval-ms
+      - "1000"
+      - --queue-capacity
+      - "4096"
+      - --retention-days
+      - "30"
+    network_mode: host
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - netwatch-data:/var/lib/netwatch
+    restart: unless-stopped
+
+  api:
+    image: netwatch:local
+    command:
+      - netwatch_api
+      - --database
+      - /var/lib/netwatch/netwatch.db
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "8088"
+    depends_on:
+      - agent
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:8088:8088"
+    volumes:
+      - netwatch-data:/var/lib/netwatch
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8088/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  netwatch-data:
+

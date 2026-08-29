@@ -29,3 +29,33 @@ jobs:
       - name: Test
         run: ctest --test-dir build/debug --output-on-failure
 
+      - name: Validate shell scripts
+        run: bash -n scripts/*.sh
+
+      - name: Install and smoke test
+        run: |
+          cmake --install build/debug --prefix "$RUNNER_TEMP/netwatch"
+          ./scripts/smoke-test.sh "$RUNNER_TEMP/netwatch"
+
+      - name: Build release archive
+        run: cpack --config build/debug/CPackConfig.cmake -B build/package
+
+      - name: Validate Docker Compose model
+        run: docker compose config --quiet
+
+  container:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build runtime image
+        run: docker build --tag netwatch:ci .
+
+      - name: Verify image version and assets
+        run: |
+          docker run --rm netwatch:ci netwatch --version
+          docker run --rm netwatch:ci netwatch_api --version
+          docker run --rm netwatch:ci test -f /usr/share/netwatch/web/index.html
+

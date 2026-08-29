@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsqlite3-dev sqlite3
+
+      - name: Verify tag matches project version
+        shell: bash
+        run: |
+          project_version="$(sed -n \
+            '/project(/,/)/s/^[[:space:]]*VERSION[[:space:]]\+\([^[:space:]]\+\).*/\1/p' \
+            CMakeLists.txt)"
+          test "${GITHUB_REF_NAME}" = "v${project_version}"
+
+      - name: Configure and build tests
+        run: |
+          cmake --preset debug
+          cmake --build --preset debug
+
+      - name: Test
+        run: ctest --preset debug
+
+      - name: Build optimized release
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cpack --config build/release/CPackConfig.cmake -B dist
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz \
+            dist/SHA256SUMS \
+            --title "NetWatch ${GITHUB_REF_NAME}" \
+            --generate-notes
+

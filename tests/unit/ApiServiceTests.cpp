@@ -128,7 +128,7 @@ TEST_CASE("API health response identifies the service")
 
     CHECK(body.at("status") == "ok");
     CHECK(body.at("service") == "netwatch-api");
-    CHECK(body.at("version") == "0.5.0");
+    CHECK(body.at("version") == NETWATCH_VERSION);
     CHECK(body.at("generated_at").is_string());
 }
 

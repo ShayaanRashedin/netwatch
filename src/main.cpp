@@ -46,6 +46,7 @@ struct Options {
     bool persist {true};
     bool once {};
     bool help {};
+    bool version {};
 };
 
 std::string_view requireValue(
@@ -115,6 +116,11 @@ Options parseOptions(const int argc, char* argv[])
 
         if (argument == "--help" || argument == "-h") {
             options.help = true;
+            continue;
+        }
+
+        if (argument == "--version") {
+            options.version = true;
             continue;
         }
 
@@ -261,6 +267,7 @@ void printUsage()
         << "  --min-score VALUE       Filter --alerts to risk score"
         << " 0-100\n"
         << "  --no-persist            Monitor without writing SQLite\n"
+        << "  --version               Show the NetWatch version\n"
         << "  --help, -h              Show this help\n";
 }
 
@@ -658,6 +665,11 @@ int main(const int argc, char* argv[])
 
     if (options.help) {
         printUsage();
+        return 0;
+    }
+
+    if (options.version) {
+        std::cout << "NetWatch " << NETWATCH_VERSION << '\n';
         return 0;
     }
 

@@ -1,0 +1,13 @@
+.git
+.github
+build
+out
+cmake-build-*
+*.db
+*.db-shm
+*.db-wal
+demo-data
+logs
+.vscode
+.idea
+

@@ -1,0 +1,31 @@
+[Unit]
+Description=NetWatch read-only API and dashboard
+Documentation=https://github.com/ShayaanRashedin/netwatch
+After=network.target netwatch.service
+
+[Service]
+Type=simple
+User=netwatch
+Group=netwatch
+EnvironmentFile=-/etc/netwatch/netwatch.env
+ExecStart=/usr/bin/netwatch_api --database ${NETWATCH_DATABASE} --listen ${NETWATCH_API_LISTEN} --port ${NETWATCH_API_PORT} --web-root /usr/share/netwatch/web
+Restart=on-failure
+RestartSec=3s
+UMask=0007
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/netwatch
+
+[Install]
+WantedBy=multi-user.target
+

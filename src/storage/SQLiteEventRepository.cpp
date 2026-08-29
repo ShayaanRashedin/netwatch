@@ -409,6 +409,31 @@ void SQLiteEventRepository::initializeSchema()
                 ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER NOT NULL,
+            detected_at_ms INTEGER NOT NULL,
+            rule_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            risk_score INTEGER NOT NULL
+                CHECK(risk_score BETWEEN 0 AND 100),
+            severity TEXT NOT NULL,
+            FOREIGN KEY(event_id)
+                REFERENCES socket_events(id)
+                ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS alert_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER NOT NULL,
+            position INTEGER NOT NULL,
+            detail TEXT NOT NULL,
+            FOREIGN KEY(alert_id)
+                REFERENCES alerts(id)
+                ON DELETE CASCADE
+        );
+
         CREATE INDEX IF NOT EXISTS idx_socket_events_observed_at
             ON socket_events(observed_at_ms DESC);
 
@@ -418,11 +443,25 @@ void SQLiteEventRepository::initializeSchema()
         CREATE INDEX IF NOT EXISTS idx_event_processes_event_id
             ON event_processes(event_id);
 
-        PRAGMA user_version = 1;
+        CREATE INDEX IF NOT EXISTS idx_alerts_detected_at
+            ON alerts(detected_at_ms DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_alerts_risk_score
+            ON alerts(risk_score DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_alerts_rule_id
+            ON alerts(rule_id);
+
+        CREATE INDEX IF NOT EXISTS idx_alert_evidence_alert_id
+            ON alert_evidence(alert_id, position);
+
+        PRAGMA user_version = 2;
     )sql");
 }
 
-void SQLiteEventRepository::persist(const SocketEvent& event)
+void SQLiteEventRepository::persist(
+    const SocketEvent& event,
+    const std::vector<Alert>& alerts)
 {
     static constexpr const char* insertEvent = R"sql(
         INSERT INTO socket_events (
@@ -453,6 +492,26 @@ void SQLiteEventRepository::persist(const SocketEvent& event)
             executable,
             command_line
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+    )sql";
+
+    static constexpr const char* insertAlert = R"sql(
+        INSERT INTO alerts (
+            event_id,
+            detected_at_ms,
+            rule_id,
+            title,
+            reason,
+            risk_score,
+            severity
+        ) VALUES (?, ?, ?, ?, ?, ?, ?);
+    )sql";
+
+    static constexpr const char* insertEvidence = R"sql(
+        INSERT INTO alert_evidence (
+            alert_id,
+            position,
+            detail
+        ) VALUES (?, ?, ?);
     )sql";
 
     execute(database_, "BEGIN IMMEDIATE TRANSACTION;");
@@ -545,6 +604,92 @@ void SQLiteEventRepository::persist(const SocketEvent& event)
 
             if (sqlite3_clear_bindings(processHandle) != SQLITE_OK) {
                 throwDatabaseError(database_, "SQLite clear process bindings");
+            }
+        }
+
+        Statement alertStatement {database_, insertAlert};
+        Statement evidenceStatement {database_, insertEvidence};
+
+        for (const auto& alert : alerts) {
+            if (alert.risk_score < 0 || alert.risk_score > 100) {
+                throw std::invalid_argument {
+                    "alert risk score must be between 0 and 100"
+                };
+            }
+
+            sqlite3_stmt* alertHandle = alertStatement.get();
+
+            requireBind(database_, sqlite3_bind_int64(
+                alertHandle, 1, eventId));
+            requireBind(database_, sqlite3_bind_int64(
+                alertHandle,
+                2,
+                toEpochMilliseconds(alert.detected_at)
+            ));
+            bindText(database_, alertHandle, 3, alert.rule_id);
+            bindText(database_, alertHandle, 4, alert.title);
+            bindText(database_, alertHandle, 5, alert.reason);
+            requireBind(database_, sqlite3_bind_int(
+                alertHandle, 6, alert.risk_score));
+            bindText(
+                database_,
+                alertHandle,
+                7,
+                alertSeverityToString(alert.severity)
+            );
+
+            if (sqlite3_step(alertHandle) != SQLITE_DONE) {
+                throwDatabaseError(database_, "SQLite insert alert");
+            }
+
+            const sqlite3_int64 alertId =
+                sqlite3_last_insert_rowid(database_);
+
+            if (sqlite3_reset(alertHandle) != SQLITE_OK) {
+                throwDatabaseError(database_, "SQLite reset alert insert");
+            }
+
+            if (sqlite3_clear_bindings(alertHandle) != SQLITE_OK) {
+                throwDatabaseError(database_, "SQLite clear alert bindings");
+            }
+
+            std::size_t evidencePosition {};
+
+            for (const auto& detail : alert.evidence) {
+                sqlite3_stmt* evidenceHandle = evidenceStatement.get();
+
+                requireBind(database_, sqlite3_bind_int64(
+                    evidenceHandle, 1, alertId));
+                requireBind(database_, sqlite3_bind_int64(
+                    evidenceHandle,
+                    2,
+                    static_cast<sqlite3_int64>(evidencePosition)
+                ));
+                bindText(database_, evidenceHandle, 3, detail);
+
+                if (sqlite3_step(evidenceHandle) != SQLITE_DONE) {
+                    throwDatabaseError(
+                        database_,
+                        "SQLite insert alert evidence"
+                    );
+                }
+
+                if (sqlite3_reset(evidenceHandle) != SQLITE_OK) {
+                    throwDatabaseError(
+                        database_,
+                        "SQLite reset evidence insert"
+                    );
+                }
+
+                if (sqlite3_clear_bindings(evidenceHandle)
+                    != SQLITE_OK) {
+                    throwDatabaseError(
+                        database_,
+                        "SQLite clear evidence bindings"
+                    );
+                }
+
+                ++evidencePosition;
             }
         }
 
@@ -723,6 +868,247 @@ SQLiteEventRepository::recentEvents(const std::size_t limit) const
     return storedEvents;
 }
 
+std::vector<StoredAlert> SQLiteEventRepository::recentAlerts(
+    const std::size_t limit,
+    const int minimumRiskScore) const
+{
+    if (limit == 0U) {
+        return {};
+    }
+
+    if (minimumRiskScore < 0 || minimumRiskScore > 100) {
+        throw std::invalid_argument {
+            "minimum risk score must be between 0 and 100"
+        };
+    }
+
+    if (limit > static_cast<std::size_t>(
+            std::numeric_limits<sqlite3_int64>::max())) {
+        throw std::length_error {"SQLite query limit is too large"};
+    }
+
+    static constexpr const char* selectAlerts = R"sql(
+        SELECT
+            a.id,
+            a.event_id,
+            a.detected_at_ms,
+            a.rule_id,
+            a.title,
+            a.reason,
+            a.risk_score,
+            a.severity,
+            s.observed_at_ms,
+            s.event_type,
+            s.family,
+            s.protocol,
+            s.local_address,
+            s.local_port,
+            s.remote_address,
+            s.remote_port,
+            s.state,
+            s.previous_state,
+            s.inode,
+            s.tx_queue_bytes,
+            s.rx_queue_bytes
+        FROM alerts AS a
+        INNER JOIN socket_events AS s ON s.id = a.event_id
+        WHERE a.risk_score >= ?
+        ORDER BY a.detected_at_ms DESC, a.id DESC
+        LIMIT ?;
+    )sql";
+
+    static constexpr const char* selectProcesses = R"sql(
+        SELECT
+            pid,
+            start_time_ticks,
+            uid,
+            username,
+            name,
+            executable,
+            command_line
+        FROM event_processes
+        WHERE event_id = ?
+        ORDER BY id;
+    )sql";
+
+    static constexpr const char* selectEvidence = R"sql(
+        SELECT detail
+        FROM alert_evidence
+        WHERE alert_id = ?
+        ORDER BY position, id;
+    )sql";
+
+    Statement alertStatement {database_, selectAlerts};
+    Statement processStatement {database_, selectProcesses};
+    Statement evidenceStatement {database_, selectEvidence};
+
+    requireBind(database_, sqlite3_bind_int(
+        alertStatement.get(), 1, minimumRiskScore));
+    requireBind(database_, sqlite3_bind_int64(
+        alertStatement.get(),
+        2,
+        static_cast<sqlite3_int64>(limit)
+    ));
+
+    std::vector<StoredAlert> storedAlerts;
+
+    int alertResult = SQLITE_ROW;
+    while ((alertResult = sqlite3_step(alertStatement.get()))
+        == SQLITE_ROW) {
+        StoredAlert stored;
+        stored.id = sqlite3_column_int64(alertStatement.get(), 0);
+        stored.event_id = sqlite3_column_int64(
+            alertStatement.get(), 1);
+
+        auto& alert = stored.alert;
+        alert.detected_at = fromEpochMilliseconds(
+            sqlite3_column_int64(alertStatement.get(), 2)
+        );
+        alert.rule_id = columnText(alertStatement.get(), 3);
+        alert.title = columnText(alertStatement.get(), 4);
+        alert.reason = columnText(alertStatement.get(), 5);
+        alert.risk_score = sqlite3_column_int(
+            alertStatement.get(), 6);
+        alert.severity = alertSeverityFromString(
+            columnText(alertStatement.get(), 7)
+        );
+
+        auto& event = alert.source_event;
+        auto& socket = event.observation.socket;
+
+        event.observed_at = fromEpochMilliseconds(
+            sqlite3_column_int64(alertStatement.get(), 8)
+        );
+        event.type = eventTypeFromText(
+            columnText(alertStatement.get(), 9)
+        );
+        socket.family = familyFromText(
+            columnText(alertStatement.get(), 10)
+        );
+        socket.protocol = protocolFromText(
+            columnText(alertStatement.get(), 11)
+        );
+        socket.local.address = columnText(
+            alertStatement.get(), 12);
+        socket.local.port = static_cast<std::uint16_t>(
+            sqlite3_column_int(alertStatement.get(), 13)
+        );
+        socket.remote.address = columnText(
+            alertStatement.get(), 14);
+        socket.remote.port = static_cast<std::uint16_t>(
+            sqlite3_column_int(alertStatement.get(), 15)
+        );
+        socket.state = stateFromText(
+            columnText(alertStatement.get(), 16)
+        );
+
+        if (sqlite3_column_type(alertStatement.get(), 17)
+            != SQLITE_NULL) {
+            event.previous_state = stateFromText(
+                columnText(alertStatement.get(), 17)
+            );
+        }
+
+        socket.inode = static_cast<std::uint64_t>(
+            sqlite3_column_int64(alertStatement.get(), 18)
+        );
+        socket.tx_queue_bytes = static_cast<std::uint64_t>(
+            sqlite3_column_int64(alertStatement.get(), 19)
+        );
+        socket.rx_queue_bytes = static_cast<std::uint64_t>(
+            sqlite3_column_int64(alertStatement.get(), 20)
+        );
+
+        sqlite3_stmt* processHandle = processStatement.get();
+        requireBind(database_, sqlite3_bind_int64(
+            processHandle, 1, stored.event_id));
+
+        int processResult = SQLITE_ROW;
+        while ((processResult = sqlite3_step(processHandle))
+            == SQLITE_ROW) {
+            ProcessInfo process;
+            process.pid = sqlite3_column_int(processHandle, 0);
+
+            if (sqlite3_column_type(processHandle, 1)
+                != SQLITE_NULL) {
+                process.start_time_ticks =
+                    static_cast<std::uint64_t>(
+                        sqlite3_column_int64(processHandle, 1)
+                    );
+            }
+
+            if (sqlite3_column_type(processHandle, 2)
+                != SQLITE_NULL) {
+                process.uid = static_cast<unsigned int>(
+                    sqlite3_column_int64(processHandle, 2)
+                );
+            }
+
+            process.username = columnText(processHandle, 3);
+            process.name = columnText(processHandle, 4);
+            process.executable = columnText(processHandle, 5);
+            process.command_line = columnText(processHandle, 6);
+            event.observation.owners.push_back(std::move(process));
+        }
+
+        if (processResult != SQLITE_DONE) {
+            throwDatabaseError(database_, "SQLite select alert processes");
+        }
+
+        if (sqlite3_reset(processHandle) != SQLITE_OK) {
+            throwDatabaseError(
+                database_,
+                "SQLite reset alert process query"
+            );
+        }
+
+        if (sqlite3_clear_bindings(processHandle) != SQLITE_OK) {
+            throwDatabaseError(
+                database_,
+                "SQLite clear alert process query"
+            );
+        }
+
+        sqlite3_stmt* evidenceHandle = evidenceStatement.get();
+        requireBind(database_, sqlite3_bind_int64(
+            evidenceHandle, 1, stored.id));
+
+        int evidenceResult = SQLITE_ROW;
+        while ((evidenceResult = sqlite3_step(evidenceHandle))
+            == SQLITE_ROW) {
+            alert.evidence.push_back(
+                columnText(evidenceHandle, 0)
+            );
+        }
+
+        if (evidenceResult != SQLITE_DONE) {
+            throwDatabaseError(database_, "SQLite select alert evidence");
+        }
+
+        if (sqlite3_reset(evidenceHandle) != SQLITE_OK) {
+            throwDatabaseError(
+                database_,
+                "SQLite reset alert evidence query"
+            );
+        }
+
+        if (sqlite3_clear_bindings(evidenceHandle) != SQLITE_OK) {
+            throwDatabaseError(
+                database_,
+                "SQLite clear alert evidence query"
+            );
+        }
+
+        storedAlerts.push_back(std::move(stored));
+    }
+
+    if (alertResult != SQLITE_DONE) {
+        throwDatabaseError(database_, "SQLite select alerts");
+    }
+
+    return storedAlerts;
+}
+
 std::size_t SQLiteEventRepository::deleteEventsOlderThan(
     const std::chrono::system_clock::time_point cutoff)
 {
@@ -754,6 +1140,14 @@ std::size_t SQLiteEventRepository::processCount() const
     return readCount(
         database_,
         "SELECT COUNT(*) FROM event_processes;"
+    );
+}
+
+std::size_t SQLiteEventRepository::alertCount() const
+{
+    return readCount(
+        database_,
+        "SELECT COUNT(*) FROM alerts;"
     );
 }
 

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     NetWatch
-    VERSION 0.3.0
+    VERSION 0.4.0
     DESCRIPTION "Linux network and process observability agent"
     LANGUAGES CXX
 )
@@ -27,6 +27,8 @@ endfunction()
 
 add_library(netwatch_core
     src/core/SocketSnapshot.cpp
+    src/detection/Alert.cpp
+    src/detection/DetectionEngine.cpp
     src/monitoring/SnapshotDiffer.cpp
     src/persistence/EventWriter.cpp
     src/procfs/ProcNetSocketParser.cpp
@@ -71,7 +73,9 @@ if(BUILD_TESTING)
     FetchContent_MakeAvailable(Catch2)
 
     add_executable(netwatch_tests
+        tests/unit/AlertTests.cpp
         tests/unit/BoundedQueueTests.cpp
+        tests/unit/DetectionEngineTests.cpp
         tests/unit/EventWriterTests.cpp
         tests/unit/ProcNetSocketParserTests.cpp
         tests/unit/ProcSocketCollectorTests.cpp

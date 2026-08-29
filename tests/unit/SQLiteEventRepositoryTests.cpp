@@ -171,3 +171,86 @@ TEST_CASE("SQLite retention removes old events and related processes")
         .event.observation.socket.inode == 20U);
 }
 
+TEST_CASE("SQLite repository round-trips alerts and evidence")
+{
+    TemporaryDatabase database;
+    netwatch::SQLiteEventRepository repository {database.path()};
+
+    auto event = makeEvent(50, 500U);
+
+    netwatch::ProcessInfo owner;
+    owner.pid = 5000;
+    owner.start_time_ticks = 700U;
+    owner.name = "suspicious-process";
+    event.observation.owners.push_back(owner);
+
+    netwatch::Alert alert;
+    alert.detected_at = event.observed_at;
+    alert.rule_id = "test-rule";
+    alert.title = "Test alert";
+    alert.reason = "Deterministic test reason";
+    alert.risk_score = 85;
+    alert.severity = netwatch::AlertSeverity::Critical;
+    alert.source_event = event;
+    alert.evidence = {
+        "pid=5000",
+        "local=::1:8080"
+    };
+
+    repository.persist(event, {alert});
+
+    CHECK(repository.eventCount() == 1U);
+    CHECK(repository.alertCount() == 1U);
+
+    const auto stored = repository.recentAlerts(10U, 80);
+    REQUIRE(stored.size() == 1U);
+
+    const auto& restored = stored.front();
+    CHECK(restored.event_id > 0);
+    CHECK(restored.alert.rule_id == "test-rule");
+    CHECK(restored.alert.risk_score == 85);
+    CHECK(restored.alert.severity
+        == netwatch::AlertSeverity::Critical);
+    CHECK(restored.alert.reason == "Deterministic test reason");
+    REQUIRE(restored.alert.evidence.size() == 2U);
+    CHECK(restored.alert.evidence[0] == "pid=5000");
+    CHECK(restored.alert.source_event.observation.socket.inode
+        == 500U);
+    REQUIRE(restored.alert.source_event.observation.owners.size()
+        == 1U);
+    CHECK(restored.alert.source_event.observation.owners[0].pid
+        == 5000);
+
+    CHECK(repository.recentAlerts(10U, 90).empty());
+}
+
+TEST_CASE("SQLite retention cascades from events to alerts")
+{
+    TemporaryDatabase database;
+    netwatch::SQLiteEventRepository repository {database.path()};
+
+    auto event = makeEvent(10, 10U);
+    netwatch::Alert alert;
+    alert.detected_at = event.observed_at;
+    alert.rule_id = "old-alert";
+    alert.title = "Old alert";
+    alert.reason = "Old evidence";
+    alert.risk_score = 60;
+    alert.severity = netwatch::AlertSeverity::High;
+    alert.source_event = event;
+    alert.evidence = {"old=true"};
+
+    repository.persist(event, {alert});
+    REQUIRE(repository.alertCount() == 1U);
+
+    repository.deleteEventsOlderThan(
+        std::chrono::system_clock::time_point {
+            std::chrono::seconds {20}
+        }
+    );
+
+    CHECK(repository.eventCount() == 0U);
+    CHECK(repository.alertCount() == 0U);
+    CHECK(repository.recentAlerts(10U).empty());
+}
+

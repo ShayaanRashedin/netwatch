@@ -69,4 +69,3 @@ curl --fail --silent \
     | grep -Fq '<title>NetWatch'
 
 echo "Installed NetWatch smoke test passed."
-

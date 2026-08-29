@@ -59,4 +59,3 @@ systemctl daemon-reload
 echo "NetWatch systemd assets are installed."
 echo "Review /etc/netwatch/netwatch.env, then run:"
 echo "  systemctl enable --now netwatch netwatch-api"
-

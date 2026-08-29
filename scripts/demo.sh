@@ -79,4 +79,3 @@ echo "Press Ctrl+C to stop the demo and remove its temporary data."
     --port 8088 &
 api_pid=$!
 wait "${api_pid}"
-

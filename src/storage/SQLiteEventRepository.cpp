@@ -1151,5 +1151,103 @@ std::size_t SQLiteEventRepository::alertCount() const
     );
 }
 
+StorageSummary SQLiteEventRepository::summary() const
+{
+    StorageSummary result;
+    result.event_count = eventCount();
+    result.process_owner_count = processCount();
+    result.alert_count = alertCount();
+
+    {
+        Statement statement {
+            database_,
+            "SELECT severity, COUNT(*) FROM alerts GROUP BY severity;"
+        };
+
+        int stepResult = SQLITE_ROW;
+        while ((stepResult = sqlite3_step(statement.get()))
+            == SQLITE_ROW) {
+            const auto severity = alertSeverityFromString(
+                columnText(statement.get(), 0)
+            );
+            const auto count = static_cast<std::size_t>(
+                sqlite3_column_int64(statement.get(), 1)
+            );
+
+            switch (severity) {
+            case AlertSeverity::Low:
+                result.low_alert_count = count;
+                break;
+            case AlertSeverity::Medium:
+                result.medium_alert_count = count;
+                break;
+            case AlertSeverity::High:
+                result.high_alert_count = count;
+                break;
+            case AlertSeverity::Critical:
+                result.critical_alert_count = count;
+                break;
+            }
+        }
+
+        if (stepResult != SQLITE_DONE) {
+            throwDatabaseError(database_, "SQLite summarize severities");
+        }
+    }
+
+    const auto readLatest = [this](const char* sql)
+        -> std::optional<std::chrono::system_clock::time_point> {
+        Statement statement {database_, sql};
+
+        if (sqlite3_step(statement.get()) != SQLITE_ROW) {
+            throwDatabaseError(database_, "SQLite summarize timestamp");
+        }
+
+        if (sqlite3_column_type(statement.get(), 0) == SQLITE_NULL) {
+            return std::nullopt;
+        }
+
+        return fromEpochMilliseconds(
+            sqlite3_column_int64(statement.get(), 0)
+        );
+    };
+
+    result.latest_event_at = readLatest(
+        "SELECT MAX(observed_at_ms) FROM socket_events;"
+    );
+    result.latest_alert_at = readLatest(
+        "SELECT MAX(detected_at_ms) FROM alerts;"
+    );
+
+    {
+        Statement statement {
+            database_,
+            R"sql(
+                SELECT rule_id, COUNT(*) AS rule_count
+                FROM alerts
+                GROUP BY rule_id
+                ORDER BY rule_count DESC, rule_id;
+            )sql"
+        };
+
+        int stepResult = SQLITE_ROW;
+        while ((stepResult = sqlite3_step(statement.get()))
+            == SQLITE_ROW) {
+            result.alerts_by_rule.push_back(AlertRuleCount {
+                columnText(statement.get(), 0),
+                static_cast<std::size_t>(
+                    sqlite3_column_int64(statement.get(), 1)
+                )
+            });
+        }
+
+        if (stepResult != SQLITE_DONE) {
+            throwDatabaseError(database_, "SQLite summarize alert rules");
+        }
+    }
+
+    return result;
+}
+
 } // namespace netwatch
 

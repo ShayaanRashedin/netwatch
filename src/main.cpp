@@ -1,6 +1,8 @@
 #include "netwatch/core/NetworkTypes.hpp"
 #include "netwatch/core/ProcessInfo.hpp"
 #include "netwatch/core/SocketSnapshot.hpp"
+#include "netwatch/detection/Alert.hpp"
+#include "netwatch/detection/DetectionEngine.hpp"
 #include "netwatch/monitoring/SnapshotDiffer.hpp"
 #include "netwatch/persistence/EventWriter.hpp"
 #include "netwatch/procfs/ProcessResolver.hpp"
@@ -39,6 +41,8 @@ struct Options {
     std::size_t queue_capacity {1024U};
     std::uint64_t retention_days {30U};
     std::size_t history_limit {};
+    std::size_t alerts_limit {};
+    int minimum_risk_score {};
     bool persist {true};
     bool once {};
     bool help {};
@@ -184,6 +188,30 @@ Options parseOptions(const int argc, char* argv[])
             continue;
         }
 
+        if (argument == "--alerts") {
+            const auto value = parseUnsignedOption(
+                argument,
+                requireValue(argc, argv, argumentIndex, argument),
+                1U,
+                10'000U
+            );
+
+            options.alerts_limit = static_cast<std::size_t>(value);
+            continue;
+        }
+
+        if (argument == "--min-score") {
+            const auto value = parseUnsignedOption(
+                argument,
+                requireValue(argc, argv, argumentIndex, argument),
+                0U,
+                100U
+            );
+
+            options.minimum_risk_score = static_cast<int>(value);
+            continue;
+        }
+
         throw std::invalid_argument {
             "unknown option: " + std::string {argument}
         };
@@ -192,6 +220,20 @@ Options parseOptions(const int argc, char* argv[])
     if (options.history_limit > 0U && options.once) {
         throw std::invalid_argument {
             "--history and --once cannot be used together"
+        };
+    }
+
+    if (options.alerts_limit > 0U
+        && (options.once || options.history_limit > 0U)) {
+        throw std::invalid_argument {
+            "--alerts cannot be combined with --once or --history"
+        };
+    }
+
+    if (options.minimum_risk_score > 0
+        && options.alerts_limit == 0U) {
+        throw std::invalid_argument {
+            "--min-score requires --alerts"
         };
     }
 
@@ -214,6 +256,10 @@ void printUsage()
         << " (default: 30; 0 disables)\n"
         << "  --history LIMIT         Print recent persisted events"
         << " and exit\n"
+        << "  --alerts LIMIT          Print recent persisted alerts"
+        << " and exit\n"
+        << "  --min-score VALUE       Filter --alerts to risk score"
+        << " 0-100\n"
         << "  --no-persist            Monitor without writing SQLite\n"
         << "  --help, -h              Show this help\n";
 }
@@ -411,6 +457,22 @@ void printEvent(const netwatch::SocketEvent& event)
     std::cout << '\n';
 }
 
+void printAlert(const netwatch::Alert& alert)
+{
+    std::cout
+        << '[' << formatTimestamp(alert.detected_at) << "] ALERT"
+        << " severity="
+        << netwatch::alertSeverityToString(alert.severity)
+        << " score=" << alert.risk_score
+        << " rule=" << alert.rule_id
+        << " title=\"" << alert.title << "\"\n"
+        << "  reason: " << alert.reason << '\n';
+
+    for (const auto& evidence : alert.evidence) {
+        std::cout << "  evidence: " << evidence << '\n';
+    }
+}
+
 netwatch::SocketSnapshot collectSnapshot(
     const netwatch::ProcSocketCollector& collector,
     const netwatch::ProcessResolver& resolver)
@@ -434,6 +496,34 @@ int showHistory(const Options& options)
     for (const auto& stored : events) {
         std::cout << '#' << stored.id << ' ';
         printEvent(stored.event);
+    }
+
+    return 0;
+}
+
+int showAlerts(const Options& options)
+{
+    netwatch::SQLiteEventRepository repository {options.database};
+    const auto alerts = repository.recentAlerts(
+        options.alerts_limit,
+        options.minimum_risk_score
+    );
+
+    std::cout
+        << "NetWatch persisted alert history\n"
+        << "Database: " << options.database << '\n'
+        << "Minimum risk score: "
+        << options.minimum_risk_score << '\n'
+        << "Alerts shown: " << alerts.size() << "\n\n";
+
+    for (const auto& stored : alerts) {
+        std::cout
+            << "alert_id=" << stored.id
+            << " event_id=" << stored.event_id << '\n';
+        printAlert(stored.alert);
+        std::cout << "  source: ";
+        printEvent(stored.alert.source_event);
+        std::cout << '\n';
     }
 
     return 0;
@@ -495,6 +585,7 @@ int monitor(const Options& options)
     std::cout << "Press Ctrl+C to stop.\n";
 
     netwatch::SnapshotDiffer differ;
+    netwatch::DetectionEngine detector;
 
     while (stopRequested == 0) {
         std::this_thread::sleep_for(options.interval);
@@ -514,7 +605,13 @@ int monitor(const Options& options)
         for (const auto& event : events) {
             printEvent(event);
 
-            if (writer && !writer->submit(event)) {
+            const auto alerts = detector.evaluate(event);
+
+            for (const auto& alert : alerts) {
+                printAlert(alert);
+            }
+
+            if (writer && !writer->submit(event, alerts)) {
                 std::cerr
                     << "Persistence queue closed unexpectedly.\n";
                 stopRequested = 1;
@@ -536,7 +633,9 @@ int monitor(const Options& options)
 
         std::cout
             << "Persisted " << writer->persistedCount()
-            << " events.\n";
+            << " events and "
+            << writer->persistedAlertCount()
+            << " alerts.\n";
     }
 
     std::cout << "NetWatch stopped.\n";
@@ -565,6 +664,10 @@ int main(const int argc, char* argv[])
     try {
         if (options.history_limit > 0U) {
             return showHistory(options);
+        }
+
+        if (options.alerts_limit > 0U) {
+            return showAlerts(options);
         }
 
         return monitor(options);

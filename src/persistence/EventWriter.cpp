@@ -19,9 +19,14 @@ EventWriter::~EventWriter()
     stop();
 }
 
-bool EventWriter::submit(SocketEvent event)
+bool EventWriter::submit(
+    SocketEvent event,
+    std::vector<Alert> alerts)
 {
-    return queue_.push(std::move(event));
+    return queue_.push(PendingWrite {
+        std::move(event),
+        std::move(alerts)
+    });
 }
 
 void EventWriter::stop()
@@ -38,6 +43,11 @@ std::size_t EventWriter::persistedCount() const noexcept
     return persisted_count_.load();
 }
 
+std::size_t EventWriter::persistedAlertCount() const noexcept
+{
+    return persisted_alert_count_.load();
+}
+
 std::optional<std::string> EventWriter::failure() const
 {
     std::lock_guard lock {failure_mutex_};
@@ -47,9 +57,13 @@ std::optional<std::string> EventWriter::failure() const
 void EventWriter::run() noexcept
 {
     try {
-        while (auto event = queue_.pop()) {
-            repository_.persist(*event);
+        while (auto pending = queue_.pop()) {
+            repository_.persist(
+                pending->event,
+                pending->alerts
+            );
             ++persisted_count_;
+            persisted_alert_count_ += pending->alerts.size();
         }
     } catch (const std::exception& error) {
         {

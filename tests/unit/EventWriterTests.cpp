@@ -70,11 +70,23 @@ TEST_CASE("Event writer drains its bounded queue before shutdown")
 {
     WriterDatabase database;
     std::size_t persistedCount {};
+    std::size_t persistedAlertCount {};
 
     {
         netwatch::EventWriter writer {database.path(), 1U};
 
-        REQUIRE(writer.submit(writerEvent(1U)));
+        auto firstEvent = writerEvent(1U);
+        netwatch::Alert alert;
+        alert.detected_at = firstEvent.observed_at;
+        alert.rule_id = "writer-test";
+        alert.title = "Writer test alert";
+        alert.reason = "Exercise queued alert persistence";
+        alert.risk_score = 50;
+        alert.severity = netwatch::AlertSeverity::High;
+        alert.source_event = firstEvent;
+        alert.evidence = {"test=true"};
+
+        REQUIRE(writer.submit(firstEvent, {alert}));
         REQUIRE(writer.submit(writerEvent(2U)));
         REQUIRE(writer.submit(writerEvent(3U)));
 
@@ -82,12 +94,15 @@ TEST_CASE("Event writer drains its bounded queue before shutdown")
 
         CHECK_FALSE(writer.failure().has_value());
         persistedCount = writer.persistedCount();
+        persistedAlertCount = writer.persistedAlertCount();
     }
 
     CHECK(persistedCount == 3U);
+    CHECK(persistedAlertCount == 1U);
 
     netwatch::SQLiteEventRepository repository {database.path()};
     CHECK(repository.eventCount() == 3U);
+    CHECK(repository.alertCount() == 1U);
 }
 
 TEST_CASE("Event writer rejects submissions after it stops")
@@ -99,6 +114,7 @@ TEST_CASE("Event writer rejects submissions after it stops")
 
     CHECK_FALSE(writer.submit(writerEvent(1U)));
     CHECK(writer.persistedCount() == 0U);
+    CHECK(writer.persistedAlertCount() == 0U);
     CHECK_FALSE(writer.failure().has_value());
 }
 

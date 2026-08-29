@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
     NetWatch
-    VERSION 0.4.0
+    VERSION 0.5.0
     DESCRIPTION "Linux network and process observability agent"
     LANGUAGES CXX
 )
@@ -13,6 +13,34 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(SQLite3 REQUIRED)
 find_package(Threads REQUIRED)
+
+include(FetchContent)
+
+set(HTTPLIB_USE_OPENSSL_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZLIB_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_BROTLI_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_USE_ZSTD_IF_AVAILABLE OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_INSTALL OFF CACHE BOOL "" FORCE)
+set(HTTPLIB_TEST OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.54.0
+    GIT_SHALLOW TRUE
+)
+
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+    GIT_SHALLOW TRUE
+)
+
+FetchContent_MakeAvailable(cpp_httplib nlohmann_json)
 
 function(netwatch_enable_warnings target_name)
     target_compile_options(${target_name} PRIVATE
@@ -58,11 +86,40 @@ target_link_libraries(netwatch PRIVATE
 
 netwatch_enable_warnings(netwatch)
 
+add_library(netwatch_api_core
+    src/api/ApiServer.cpp
+    src/api/ApiService.cpp
+)
+
+target_include_directories(netwatch_api_core PUBLIC
+    ${PROJECT_SOURCE_DIR}/include
+)
+
+target_link_libraries(netwatch_api_core PUBLIC
+    netwatch_core
+    httplib::httplib
+    nlohmann_json::nlohmann_json
+)
+
+netwatch_enable_warnings(netwatch_api_core)
+
+add_executable(netwatch_api
+    src/api_main.cpp
+)
+
+target_compile_definitions(netwatch_api PRIVATE
+    NETWATCH_WEB_ROOT="${PROJECT_SOURCE_DIR}/web"
+)
+
+target_link_libraries(netwatch_api PRIVATE
+    netwatch_api_core
+)
+
+netwatch_enable_warnings(netwatch_api)
+
 include(CTest)
 
 if(BUILD_TESTING)
-    include(FetchContent)
-
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -74,6 +131,7 @@ if(BUILD_TESTING)
 
     add_executable(netwatch_tests
         tests/unit/AlertTests.cpp
+        tests/unit/ApiServiceTests.cpp
         tests/unit/BoundedQueueTests.cpp
         tests/unit/DetectionEngineTests.cpp
         tests/unit/EventWriterTests.cpp
@@ -87,6 +145,7 @@ if(BUILD_TESTING)
 
     target_link_libraries(netwatch_tests PRIVATE
         netwatch_core
+        netwatch_api_core
         Catch2::Catch2WithMain
     )
 

@@ -254,3 +254,54 @@ TEST_CASE("SQLite retention cascades from events to alerts")
     CHECK(repository.recentAlerts(10U).empty());
 }
 
+TEST_CASE("SQLite summary aggregates dashboard telemetry")
+{
+    TemporaryDatabase database;
+    netwatch::SQLiteEventRepository repository {database.path()};
+
+    auto firstEvent = makeEvent(10, 10U);
+    netwatch::ProcessInfo owner;
+    owner.pid = 99;
+    owner.name = "summary-owner";
+    firstEvent.observation.owners.push_back(owner);
+
+    netwatch::Alert firstAlert;
+    firstAlert.detected_at = firstEvent.observed_at;
+    firstAlert.rule_id = "first-rule";
+    firstAlert.title = "First";
+    firstAlert.reason = "First reason";
+    firstAlert.risk_score = 60;
+    firstAlert.severity = netwatch::AlertSeverity::High;
+    firstAlert.source_event = firstEvent;
+
+    auto secondEvent = makeEvent(20, 20U);
+    netwatch::Alert secondAlert;
+    secondAlert.detected_at = secondEvent.observed_at;
+    secondAlert.rule_id = "second-rule";
+    secondAlert.title = "Second";
+    secondAlert.reason = "Second reason";
+    secondAlert.risk_score = 85;
+    secondAlert.severity = netwatch::AlertSeverity::Critical;
+    secondAlert.source_event = secondEvent;
+
+    repository.persist(firstEvent, {firstAlert});
+    repository.persist(secondEvent, {secondAlert});
+
+    const auto summary = repository.summary();
+
+    CHECK(summary.event_count == 2U);
+    CHECK(summary.process_owner_count == 1U);
+    CHECK(summary.alert_count == 2U);
+    CHECK(summary.low_alert_count == 0U);
+    CHECK(summary.medium_alert_count == 0U);
+    CHECK(summary.high_alert_count == 1U);
+    CHECK(summary.critical_alert_count == 1U);
+    REQUIRE(summary.latest_event_at.has_value());
+    REQUIRE(summary.latest_alert_at.has_value());
+    CHECK(*summary.latest_event_at == secondEvent.observed_at);
+    CHECK(*summary.latest_alert_at == secondAlert.detected_at);
+    REQUIRE(summary.alerts_by_rule.size() == 2U);
+    CHECK(summary.alerts_by_rule[0].count == 1U);
+    CHECK(summary.alerts_by_rule[1].count == 1U);
+}
+

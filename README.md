@@ -5,7 +5,8 @@
 NetWatch is a Linux network and process observability agent written in modern
 C++. It collects TCP and UDP sockets across IPv4 and IPv6, correlates them with
 their owning processes, emits lifecycle events, detects suspicious behavior,
-and persists both events and explainable alerts asynchronously to SQLite.
+persists explainable alerts to SQLite, and exposes the evidence through a
+read-only REST API and live browser dashboard.
 
 The project is a production-oriented observability pipeline rather than a
 wrapper around `ss` or `netstat`. Collection, deterministic event detection,
@@ -34,6 +35,12 @@ components with dedicated tests.
 - Writes normalized event, process, alert, and evidence records to SQLite
 - Drains accepted writes during graceful shutdown
 - Supports retention plus event and filtered alert-history queries
+- Serves health, summary, event, and risk-filtered alert JSON endpoints
+- Reads safely beside the writer through independent SQLite WAL connections
+- Includes a responsive dashboard with severity metrics, rule distribution,
+  explainable alert cards, and a process-aware event table
+- Validates and bounds every public API query parameter
+- Applies restrictive browser security headers and binds to loopback by default
 - Runs strict-warning builds and deterministic tests in GitHub Actions
 
 ## Architecture
@@ -52,12 +59,16 @@ flowchart LR
     J --> K
     K --> L[EventWriter thread]
     L --> M[(SQLite)]
+    M --> N[Read-only REST API]
+    N --> O[Live browser dashboard]
 ```
 
 The monitoring thread performs collection and deterministic analysis but never
 writes to disk. Each event and its generated alerts enter the queue as one
 batch. The background writer stores the event, owners, alerts, and evidence in
 a single transaction, so an alert cannot be separated from its source event.
+The API runs as a separate process with its own SQLite connection; WAL mode lets
+it serve live reads while the agent continues writing.
 
 ## Detection rules
 
@@ -172,6 +183,50 @@ Example alert:
   evidence: listener_scope=non-loopback
 ```
 
+### Start the API and dashboard
+
+Run the agent and API against the same database in separate terminals. First,
+start collection and detection:
+
+```bash
+./build/debug/netwatch --database netwatch.db --interval-ms 500
+```
+
+Then start the read-only API and dashboard:
+
+```bash
+./build/debug/netwatch_api --database netwatch.db
+```
+
+Open [http://127.0.0.1:8088](http://127.0.0.1:8088). The dashboard refreshes
+every three seconds and can be paused or filtered by alert risk score.
+
+Use a different bind address or port when required:
+
+```bash
+./build/debug/netwatch_api \
+  --database netwatch.db \
+  --listen 0.0.0.0 \
+  --port 8088
+```
+
+Loopback is the secure default. Binding to `0.0.0.0` exposes the dashboard to
+the network and should only be done behind appropriate host/network controls.
+
+## REST API
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/health` | Service health and API version |
+| `GET /api/summary` | Counts, severity totals, latest timestamps, and rule distribution |
+| `GET /api/events?limit=50` | Newest lifecycle events with process owners |
+| `GET /api/alerts?limit=25&min_score=50` | Alerts with reasons, evidence, and source events |
+
+`limit` must be between 1 and 500; `min_score` must be between 0 and 100.
+Invalid input returns a JSON `400` response. API responses use `no-store`, and
+the server adds content-type, frame, referrer, and Content Security Policy
+headers to the dashboard origin.
+
 Process ownership can be unavailable because of Linux permissions or because a
 process exits while a snapshot is collected. Run with suitable permissions when
 a system-wide view is required.
@@ -189,6 +244,7 @@ Database files and WAL sidecars are excluded by `.gitignore`.
 ## Repository layout
 
 ```text
+include/netwatch/api/          Read-only JSON service and HTTP server
 include/netwatch/concurrency/  Bounded thread-safe queue
 include/netwatch/core/         Domain models and enriched snapshots
 include/netwatch/detection/    Alert model, scoring, and behavioral engine
@@ -196,9 +252,11 @@ include/netwatch/monitoring/   Snapshot comparison and lifecycle events
 include/netwatch/persistence/  Background event/alert writer
 include/netwatch/procfs/       Procfs collection and process resolution
 include/netwatch/storage/      SQLite repository interface
+src/api/                       REST serialization and HTTP routing
 src/detection/                 Detection rules and explainable scoring
 src/storage/                   SQLite schema, retention, and history queries
 tests/unit/                    Deterministic unit, storage, and concurrency tests
+web/                           Dependency-free responsive dashboard
 .github/workflows/             Continuous integration
 ```
 
@@ -213,12 +271,12 @@ tests/unit/                    Deterministic unit, storage, and concurrency test
 - [x] Behavioral detection and explainable alert scoring
 - [x] Alert/evidence persistence and filtered history
 - [x] Unit tests and Linux CI
-- [ ] REST/WebSocket API and dashboard
+- [x] Read-only REST API and live dashboard
 - [ ] systemd service, container packaging, demo, and release documentation
 
 ## Status
 
-NetWatch now provides a working collection-to-detection-to-storage pipeline.
-The next milestone exposes live and historical data through an API and recruiter-
-ready dashboard.
+NetWatch now provides a working collection-to-detection-to-storage-to-dashboard
+pipeline. The final milestone focuses on systemd service deployment, container
+packaging, demo assets, and release documentation.
 

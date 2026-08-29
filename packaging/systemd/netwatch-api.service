@@ -28,4 +28,3 @@ ReadWritePaths=/var/lib/netwatch
 
 [Install]
 WantedBy=multi-user.target
-

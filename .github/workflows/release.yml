@@ -58,4 +58,3 @@ jobs:
             dist/SHA256SUMS \
             --title "NetWatch ${GITHUB_REF_NAME}" \
             --generate-notes
-

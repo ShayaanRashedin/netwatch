@@ -58,4 +58,3 @@ jobs:
           docker run --rm netwatch:ci netwatch --version
           docker run --rm netwatch:ci netwatch_api --version
           docker run --rm netwatch:ci test -f /usr/share/netwatch/web/index.html
-

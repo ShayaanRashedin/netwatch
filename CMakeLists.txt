@@ -236,4 +236,3 @@ set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_STRIP_FILES TRUE)
 
 include(CPack)
-

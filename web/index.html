@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="NetWatch live Linux network observability and explainable security alerts.">
+  <title>NetWatch Observatory</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="NetWatch dashboard home">
+      <span class="brand-mark" aria-hidden="true"><span></span></span>
+      <span>
+        <strong>NETWATCH</strong>
+        <small>LINUX NETWORK OBSERVATORY</small>
+      </span>
+    </a>
+
+    <div class="live-cluster" aria-live="polite">
+      <span class="live-dot" id="live-dot"></span>
+      <span id="connection-status">Connecting</span>
+      <span class="divider" aria-hidden="true"></span>
+      <span id="last-updated">Awaiting telemetry</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">REAL-TIME HOST INTELLIGENCE</p>
+        <h1 id="page-title">See every connection.<br><span>Understand every alert.</span></h1>
+        <p class="hero-copy">Process-aware socket telemetry, explainable behavioral detections, and durable evidence from one Linux agent.</p>
+      </div>
+
+      <div class="hero-actions">
+        <label for="risk-filter">Alert threshold</label>
+        <select id="risk-filter">
+          <option value="0">All severities</option>
+          <option value="25">Medium and above</option>
+          <option value="50" selected>High and critical</option>
+          <option value="75">Critical only</option>
+        </select>
+        <button class="button button-primary" id="refresh-button" type="button">Refresh now</button>
+        <button class="button" id="pause-button" type="button" aria-pressed="false">Pause live</button>
+      </div>
+    </section>
+
+    <div class="error-banner" id="error-banner" role="alert" hidden></div>
+
+    <section class="metrics" aria-label="Telemetry summary">
+      <article class="metric-card metric-events">
+        <div class="metric-label"><span>Lifecycle events</span><span class="metric-index">01</span></div>
+        <strong id="event-count">—</strong>
+        <p id="latest-event">No event data yet</p>
+      </article>
+      <article class="metric-card metric-alerts">
+        <div class="metric-label"><span>Explainable alerts</span><span class="metric-index">02</span></div>
+        <strong id="alert-count">—</strong>
+        <p id="latest-alert">No alert data yet</p>
+      </article>
+      <article class="metric-card metric-critical">
+        <div class="metric-label"><span>Critical findings</span><span class="metric-index">03</span></div>
+        <strong id="critical-count">—</strong>
+        <p><span id="high-count">—</span> high-severity findings</p>
+      </article>
+      <article class="metric-card metric-processes">
+        <div class="metric-label"><span>Process evidence</span><span class="metric-index">04</span></div>
+        <strong id="process-count">—</strong>
+        <p>Owner records correlated</p>
+      </article>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel rules-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">DETECTION COVERAGE</p>
+            <h2>Alert distribution</h2>
+          </div>
+          <span class="panel-meta">BY RULE</span>
+        </div>
+        <div class="severity-strip" aria-label="Alerts by severity">
+          <div><span class="severity-swatch low"></span><small>Low</small><strong id="severity-low">0</strong></div>
+          <div><span class="severity-swatch medium"></span><small>Medium</small><strong id="severity-medium">0</strong></div>
+          <div><span class="severity-swatch high"></span><small>High</small><strong id="severity-high">0</strong></div>
+          <div><span class="severity-swatch critical"></span><small>Critical</small><strong id="severity-critical">0</strong></div>
+        </div>
+        <div class="rule-bars" id="rule-bars">
+          <p class="empty-state">No alert rules have fired yet.</p>
+        </div>
+      </article>
+
+      <article class="panel alerts-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">PRIORITIZED FINDINGS</p>
+            <h2>Recent alerts</h2>
+          </div>
+          <span class="panel-meta" id="alert-filter-label">SCORE ≥ 50</span>
+        </div>
+        <div class="alert-feed" id="alert-feed" aria-live="polite">
+          <p class="empty-state">Waiting for alert telemetry.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel events-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">SOCKET LIFECYCLE</p>
+          <h2>Recent network events</h2>
+        </div>
+        <span class="panel-meta">LATEST 50</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Observed</th>
+              <th scope="col">Event</th>
+              <th scope="col">Transport</th>
+              <th scope="col">Local endpoint</th>
+              <th scope="col">Remote endpoint</th>
+              <th scope="col">State</th>
+              <th scope="col">Process</th>
+            </tr>
+          </thead>
+          <tbody id="event-rows">
+            <tr><td colspan="7" class="empty-state">Waiting for socket telemetry.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>NETWATCH OBSERVATORY</span>
+    <span>Procfs → lifecycle → detection → SQLite → API</span>
+    <span>READ-ONLY LOCAL DASHBOARD</span>
+  </footer>
+</body>
+</html>
+

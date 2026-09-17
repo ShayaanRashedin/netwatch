@@ -197,10 +197,7 @@ install(
 install(
     FILES
         README.md
-        CHANGELOG.md
-        CONTRIBUTING.md
         LICENSE
-        SECURITY.md
         THIRD_PARTY_NOTICES.md
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT Runtime

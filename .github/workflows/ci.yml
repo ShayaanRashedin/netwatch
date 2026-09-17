@@ -35,7 +35,7 @@ jobs:
       - name: Install and smoke test
         run: |
           cmake --install build/debug --prefix "$RUNNER_TEMP/netwatch"
-          ./scripts/smoke-test.sh "$RUNNER_TEMP/netwatch"
+          bash scripts/smoke-test.sh "$RUNNER_TEMP/netwatch"
 
       - name: Build release archive
         run: cpack --config build/debug/CPackConfig.cmake -B build/package
